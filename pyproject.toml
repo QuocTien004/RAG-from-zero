@@ -1,0 +1,19 @@
+[project]
+name = "huyg-rag"
+version = "0.1.0"
+description = "RAG cơ bản với Google Gemini — nền tảng để phát triển thành AI Agent"
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "numpy>=1.26.0",
+    "pypdf>=4.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Package nằm trong thư mục src/ (layout "src" chuẩn, tránh import nhầm)
+[tool.setuptools.packages.find]
+where = ["src"]

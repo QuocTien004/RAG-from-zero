@@ -1,0 +1,26 @@
+# Môi trường ảo
+.venv/
+venv/
+env/
+
+# Biến môi trường bí mật — KHÔNG BAO GIỜ commit file .env thật
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Vector store đã sinh ra — có thể tạo lại bằng: python scripts/ingest.py
+data/processed/*
+!data/processed/.gitkeep
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

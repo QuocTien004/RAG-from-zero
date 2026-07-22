@@ -1,0 +1,16 @@
+# ===== Dependencies cho project RAG cơ bản =====
+# Cài đặt:  pip install -r requirements.txt
+
+# --- Embedding: MIỄN PHÍ, chạy cục bộ trên máy (không tốn quota API) ---
+sentence-transformers>=3.0.0  # Tạo vector embedding tại chỗ (kéo theo torch, transformers)
+
+# --- Chat: gọi Gemini để SINH câu trả lời ---
+google-genai>=1.0.0      # SDK chính thức của Google, ở project này chỉ dùng để CHAT
+
+# --- Tiện ích ---
+python-dotenv>=1.0.0     # Đọc biến môi trường từ file .env (API key, tên model)
+numpy>=1.26.0            # Tính toán vector & độ tương đồng cosine cho vector store
+pypdf>=4.0.0             # (Tuỳ chọn) Đọc nội dung file PDF trong data/raw
+
+# --- Dùng cho kiểm thử (không bắt buộc khi chạy demo) ---
+pytest>=8.0.0
