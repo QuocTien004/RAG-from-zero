@@ -4,7 +4,7 @@ RAG = tìm kiếm thông tin liên quan trong tài liệu của bạn (Retrieval
 rồi đưa vào LLM để sinh câu trả lời có căn cứ (Augmented Generation).
 
 Điểm truy cập chính là lớp `RAGPipeline` trong module `pipeline`.
-Ở các bài sau, chính lớp này sẽ trở thành một "skill" mà AI Agent gọi tới.
+Lớp này cũng có thể dễ dàng được đóng gói thành một "tool/skill" cho AI Agent.
 """
 
 from .pipeline import RAGPipeline, RAGAnswer

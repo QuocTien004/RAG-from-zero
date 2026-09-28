@@ -1,7 +1,10 @@
 [project]
-name = "huyg-rag"
+name = "rag-from-zero"
 version = "0.1.0"
-description = "RAG cơ bản với Google Gemini — nền tảng để phát triển thành AI Agent"
+description = "RAG cơ bản với Google Gemini — xây dựng pipeline từ đầu không phụ thuộc framework"
+authors = [
+    { name = "QuocTien004", email = "quoctien391939@gmail.com" },
+]
 requires-python = ">=3.10"
 dependencies = [
     "google-genai>=1.0.0",

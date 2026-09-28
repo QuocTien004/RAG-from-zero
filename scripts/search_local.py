@@ -1,4 +1,4 @@
-"""CLI — Tìm kiếm ngữ nghĩa offline bằng vector store (Tập 03 trong video).
+"""CLI — Tìm kiếm ngữ nghĩa offline bằng vector store (Retrieval Local).
 
 Cách dùng:
     python scripts/search_local.py "Muốn model biết dữ liệu mới mà không fine-tune thì làm gì?"

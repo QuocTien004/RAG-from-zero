@@ -8,8 +8,8 @@ Toàn bộ RAG được rút gọn về HAI hành động:
   2. answer()  — GIAI ĐOẠN ONLINE (chạy mỗi khi có câu hỏi):
        Embed câu hỏi -> Retrieve (tìm đoạn liên quan) -> Generate (LLM trả lời)
 
-Interface gọn gàng này chính là "SKILL" mà AI Agent sẽ gọi tới ở các bài sau:
-Agent chỉ cần biết `pipeline.answer("câu hỏi")` mà không quan tâm bên trong ra sao.
+Interface gọn gàng này chính là "Tool/Skill" có thể tích hợp trực tiếp vào AI Agent:
+Agent chỉ cần gọi `pipeline.answer("câu hỏi")` mà không quan tâm chi tiết bên trong.
 """
 
 from __future__ import annotations

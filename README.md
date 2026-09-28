@@ -12,7 +12,7 @@ Một project RAG nhỏ gọn giúp bạn nhìn rõ toàn bộ quy trình **Load
 [![Gemini](https://img.shields.io/badge/Generation-Google%20Gemini-8E75B2?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 [![NumPy](https://img.shields.io/badge/Vector%20Store-NumPy-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
 [![Embeddings](https://img.shields.io/badge/Embeddings-Local%20E5-F59E0B?style=flat-square)](#embedding-cuc-bo)
-[![GitHub stars](https://img.shields.io/github/stars/breslee1707/RAG_FROM_ZERO?style=flat-square&logo=github&color=181717)](https://github.com/breslee1707/RAG_FROM_ZERO/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/QuocTien004/RAG-from-zero?style=flat-square&logo=github&color=181717)](https://github.com/QuocTien004/RAG-from-zero/stargazers)
 
 **[Bắt đầu nhanh](#bat-dau-nhanh) · [Kiến trúc](#kien-truc-he-thong) · [Cách hoạt động](#rag-hoat-dong-nhu-the-nao) · [Cấu hình](#cau-hinh) · [Xử lý lỗi](#xu-ly-loi-thuong-gap)**
 
@@ -74,7 +74,7 @@ flowchart TB
 | **Prompt chống bịa** | Gemini được yêu cầu chỉ dùng ngữ cảnh và nói rõ khi thiếu thông tin |
 | **Có kiểm thử offline** | Smoke tests cho chunking và semantic ranking không gọi API |
 
-> Đây là project học tập. Thiết kế ưu tiên khả năng quan sát và hiểu cơ chế RAG hơn các tối ưu dành cho production.
+> Thiết kế ưu tiên tính trực quan, độc lập và làm chủ toàn bộ luồng dữ liệu của kiến trúc RAG trước khi tích hợp các vector database chuyên dụng.
 
 <a id="kien-truc-he-thong"></a>
 ## Kiến trúc hệ thống
@@ -200,8 +200,8 @@ Gemini client retry tối đa bốn lần cho các lỗi tạm thời `429`, `50
 ### 1. Clone repository
 
 ```bash
-git clone https://github.com/breslee1707/RAG_FROM_ZERO.git
-cd RAG_FROM_ZERO
+git clone https://github.com/QuocTien004/RAG-from-zero.git
+cd RAG-from-zero
 ```
 
 ### 2. Tạo môi trường và cài dependencies
@@ -351,7 +351,7 @@ Các test dùng vector giả lập, không tải embedding model, không gọi G
 ## Cấu trúc thư mục
 
 ```text
-RAG_FROM_ZERO/
+RAG-from-zero/
 ├── data/
 │   ├── raw/
 │   │   ├── 01-rag-la-gi.md
@@ -431,9 +431,7 @@ RAG_FROM_ZERO/
 - [ ] OCR cho PDF scan.
 - [ ] Đánh giá retrieval bằng Recall@K, MRR và bộ câu hỏi chuẩn.
 - [ ] Streaming response và giao diện web.
-- [ ] Biến `RAGPipeline.answer()` thành tool cho AI Agent.
-
-Project tiếp theo trong series: [AI Agent From Zero](https://github.com/breslee1707/AI_AGENT_FROM_ZERO) — điều phối nhiều tool qua Gemini, Claude hoặc OpenAI.
+- [ ] Mở rộng thành AI Agent: điều phối nhiều tool qua Gemini, Claude hoặc OpenAI.
 
 <a id="dong-gop"></a>
 ## Đóng góp
@@ -450,8 +448,8 @@ git push origin feature/ten-tinh-nang
 
 <div align="center">
 
-Được xây dựng để học RAG từ cơ chế nền tảng, từng bước một.
+Được xây dựng nhằm nghiên cứu và làm chủ kiến trúc RAG từ cơ chế nền tảng, từng bước một.
 
-Nếu project hữu ích, hãy star repository để ủng hộ series.
+Nếu project hữu ích, hãy star repository để ủng hộ dự án! ⭐
 
 </div>

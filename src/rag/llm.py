@@ -3,7 +3,7 @@
 Tách riêng phần gọi LLM ra một lớp giúp:
   - Dễ đổi model (chỉ sửa một chỗ).
   - Dễ thêm tham số (nhiệt độ, giới hạn token...) sau này.
-  - Ở bài về Agent, chính lớp này có thể được tái sử dụng để "suy nghĩ" và gọi tool.
+  - Có thể tái sử dụng để làm module reasoning cho AI Agent hoặc mở rộng tool calling.
 """
 
 from __future__ import annotations
