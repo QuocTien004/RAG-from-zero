@@ -14,7 +14,7 @@ Một project RAG nhỏ gọn giúp bạn nhìn rõ toàn bộ quy trình **Load
 [![Embeddings](https://img.shields.io/badge/Embeddings-Local%20E5-F59E0B?style=flat-square)](#embedding-cuc-bo)
 [![GitHub stars](https://img.shields.io/github/stars/QuocTien004/RAG-from-zero?style=flat-square&logo=github&color=181717)](https://github.com/QuocTien004/RAG-from-zero/stargazers)
 
-**[Bắt đầu nhanh](#bat-dau-nhanh) · [Kiến trúc](#kien-truc-he-thong) · [Cách hoạt động](#rag-hoat-dong-nhu-the-nao) · [Cấu hình](#cau-hinh) · [Xử lý lỗi](#xu-ly-loi-thuong-gap)**
+**[Bắt đầu nhanh](#bat-dau-nhanh) · [Kiến trúc](#kien-truc-he-thong) · [Cách hoạt động](#rag-hoat-dong-nhu-the-nao) · [Cấu hình](#cau-hinh) · [Xử lý lỗi](#xu-ly-loi-thuong-gap) · [Nguồn tham khảo](#nguon-tham-khao)**
 
 </div>
 
@@ -32,25 +32,25 @@ LLM có thể diễn đạt tốt nhưng không tự biết tài liệu riêng c
 Project triển khai RAG thành hai pipeline độc lập:
 
 ```mermaid
-flowchart TB
-    subgraph OFFLINE["Ingestion pipeline — chạy khi tài liệu thay đổi"]
+flowchart TD
+    subgraph OFFLINE["1. Ingestion Pipeline (Offline)"]
         direction LR
-        RAW["Tài liệu<br/>TXT · Markdown · PDF"] --> LOAD["Load"]
+        RAW["Tài liệu gốc<br/>TXT · MD · PDF"] --> LOAD["Load"]
         LOAD --> CHUNK["Chunk<br/>có overlap"]
-        CHUNK --> DOCEMBED["Local embedding<br/>passage vectors"]
-        DOCEMBED --> STORE["NumPy vector store<br/>NPZ + JSON"]
+        CHUNK --> DOCEMBED["Local Embedding<br/>E5 Passage"]
+        DOCEMBED --> STORE[("Vector Store<br/>NPZ + JSON")]
     end
 
-    subgraph ONLINE["Query pipeline — chạy cho mỗi câu hỏi"]
+    subgraph ONLINE["2. Query Pipeline (Online)"]
         direction LR
-        QUESTION["Câu hỏi"] --> QEMBED["Local embedding<br/>query vector"]
-        QEMBED --> RETRIEVE["Cosine search<br/>top-k chunks"]
-        RETRIEVE --> CONTEXT["Context + sources"]
-        CONTEXT --> GEMINI["Gemini<br/>generation"]
+        QUESTION["Câu hỏi"] --> QEMBED["Embed Query<br/>E5 Query"]
+        QEMBED --> RETRIEVE["Cosine Search<br/>Top-K chunks"]
+        RETRIEVE --> CONTEXT["Context + Prompt"]
+        CONTEXT --> GEMINI["Gemini LLM<br/>Generation"]
         GEMINI --> ANSWER["Câu trả lời<br/>kèm nguồn"]
     end
 
-    STORE -. nạp từ đĩa .-> RETRIEVE
+    STORE ==>|Nạp vector từ đĩa| RETRIEVE
 
     classDef input fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E,stroke-width:2px;
     classDef process fill:#F3E8FF,stroke:#9333EA,color:#581C87,stroke-width:2px;
@@ -433,16 +433,13 @@ RAG-from-zero/
 - [ ] Streaming response và giao diện web.
 - [ ] Mở rộng thành AI Agent: điều phối nhiều tool qua Gemini, Claude hoặc OpenAI.
 
-<a id="dong-gop"></a>
-## Đóng góp
+<a id="nguon-tham-khao"></a>
+## Nguồn tham khảo
 
-Issue và pull request đều được chào đón. Khi thay đổi chunking, embedding hoặc retrieval, hãy bổ sung test và mô tả ảnh hưởng tới chất lượng tìm kiếm.
-
-```bash
-git checkout -b feature/ten-tinh-nang
-git commit -m "feat: mô tả thay đổi"
-git push origin feature/ten-tinh-nang
-```
+Dự án được xây dựng và phát triển dựa trên kiến trúc từ video hướng dẫn thực chiến:
+* **Video hướng dẫn:** [TikTok - Series Xây dựng RAG từ số 0](https://vt.tiktok.com/ZSbM79FrV/)
+* **Kênh sáng tạo nội dung:** [Code4Life ® - AI (@code4life.ai)](https://www.tiktok.com/@code4life.ai)
+* **Kho mã nguồn gốc tham khảo:** [breslee1707/RAG_FROM_ZERO](https://github.com/breslee1707/RAG_FROM_ZERO)
 
 ---
 
