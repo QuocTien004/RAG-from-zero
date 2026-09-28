@@ -44,7 +44,7 @@ class RAGPipeline:
         # Cấu hình retry NGẮN & CÓ GIỚI HẠN cho các lỗi tạm thời của server
         # (429 hết quota tạm thời, 5xx quá tải). Mặc định SDK retry rất lâu (~2 phút)
         # gây cảm giác "treo"; ở đây ta giới hạn ~4 lần, tối đa ~10s mỗi lần.
-        http_options = types.HttpOptions(
+        self._http_options = types.HttpOptions(
             retry_options=types.HttpRetryOptions(
                 attempts=4,
                 initial_delay=1.0,
@@ -52,17 +52,27 @@ class RAGPipeline:
                 http_status_codes=[429, 500, 502, 503, 504],
             )
         )
-
-        # Client Gemini giờ CHỈ dùng cho chat (sinh câu trả lời)
-        client = genai.Client(
-            api_key=self.settings.api_key, http_options=http_options
-        )
-        self.llm = GeminiLLM(client, self.settings.chat_model)
+        self._llm: GeminiLLM | None = None
 
         # Embedding chạy CỤC BỘ, miễn phí — không cần API, không tốn quota
         self.embedder = LocalEmbedder(self.settings.embed_model)
 
         self._store: VectorStore | None = None  # nạp lười (lazy) khi cần
+
+    @property
+    def llm(self) -> GeminiLLM:
+        """Khởi tạo GeminiLLM khi thực sự cần gọi sinh câu trả lời."""
+        if self._llm is None:
+            if not self.settings.api_key:
+                raise RuntimeError(
+                    "Thiếu GEMINI_API_KEY.\n"
+                    "-> Hãy mở file .env và điền API key lấy từ https://aistudio.google.com/apikey"
+                )
+            client = genai.Client(
+                api_key=self.settings.api_key, http_options=self._http_options
+            )
+            self._llm = GeminiLLM(client, self.settings.chat_model)
+        return self._llm
 
     # ---------- GIAI ĐOẠN 1: INGEST (offline) ----------
     def ingest(self) -> int:

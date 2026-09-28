@@ -42,17 +42,8 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    """Đọc cấu hình từ môi trường và trả về đối tượng Settings.
-
-    Ném lỗi rõ ràng nếu thiếu API key — giúp sinh viên biết ngay phải làm gì.
-    """
+    """Đọc cấu hình từ môi trường và trả về đối tượng Settings."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError(
-            "Thiếu GEMINI_API_KEY.\n"
-            "-> Hãy sao chép .env.example thành .env rồi điền API key "
-            "lấy từ https://aistudio.google.com/apikey"
-        )
 
     data_dir = PROJECT_ROOT / "data"
     return Settings(
