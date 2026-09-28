@@ -50,7 +50,7 @@ flowchart TD
         GEMINI --> ANSWER["Câu trả lời<br/>kèm nguồn"]
     end
 
-    STORE ==>|Nạp vector từ đĩa| RETRIEVE
+    STORE ==>|Nạp vector| RETRIEVE
 
     classDef input fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E,stroke-width:2px;
     classDef process fill:#F3E8FF,stroke:#9333EA,color:#581C87,stroke-width:2px;
@@ -436,10 +436,8 @@ RAG-from-zero/
 <a id="nguon-tham-khao"></a>
 ## Nguồn tham khảo
 
-Dự án được xây dựng và phát triển dựa trên kiến trúc từ video hướng dẫn thực chiến:
+Dự án được xây dựng và phát triển dựa trên kiến trúc từ video hướng dẫn:
 * **Video hướng dẫn:** [TikTok - Series Xây dựng RAG từ số 0](https://vt.tiktok.com/ZSbM79FrV/)
-* **Kênh sáng tạo nội dung:** [Code4Life ® - AI (@code4life.ai)](https://www.tiktok.com/@code4life.ai)
-* **Kho mã nguồn gốc tham khảo:** [breslee1707/RAG_FROM_ZERO](https://github.com/breslee1707/RAG_FROM_ZERO)
 
 ---
 
