@@ -14,7 +14,9 @@ Agent chỉ cần gọi `pipeline.answer("câu hỏi")` mà không quan tâm chi
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime
 
 from google import genai
 from google.genai import types
@@ -24,7 +26,7 @@ from .chunker import chunk_documents
 from .config import Settings, load_settings
 from .embeddings import LocalEmbedder
 from .llm import GeminiLLM
-from .loader import load_documents
+from .loader import load_documents, load_single_document, scan_raw_files
 from .vector_store import SearchResult, VectorStore
 
 
@@ -75,30 +77,132 @@ class RAGPipeline:
         return self._llm
 
     # ---------- GIAI ĐOẠN 1: INGEST (offline) ----------
-    def ingest(self) -> int:
-        """Đọc tài liệu, chia chunk, tạo embedding và lưu vector store.
+    def ingest(self, force: bool = False) -> int:
+        """Nạp tài liệu vào vector store với cơ chế Nạp bù thông minh (Incremental Ingestion).
 
-        Trả về số chunk đã tạo.
+        - Nếu file chưa đổi hash: bỏ qua, không tốn tài nguyên nhúng lại.
+        - Nếu có file mới / file sửa: chỉ nhúng các chunk của file đó và ghép vào store.
+        - Nếu có file bị xóa: tự động gỡ các chunk liên quan khỏi store.
+        - force=True: dựng lại toàn bộ vector store từ con số 0.
         """
-        documents = load_documents(self.settings.raw_dir)
-        if not documents:
+        current_files = scan_raw_files(self.settings.raw_dir)
+        if not current_files:
             raise RuntimeError(
                 f"Không tìm thấy tài liệu nào trong {self.settings.raw_dir}.\n"
                 "-> Hãy bỏ vài file .txt/.md/.pdf vào thư mục data/raw/ rồi thử lại."
             )
 
-        chunks = chunk_documents(
-            documents, self.settings.chunk_size, self.settings.chunk_overlap
-        )
-        vectors = self.embedder.embed_documents([c.text for c in chunks])
-        metadatas = [
-            {"text": c.text, "source": c.source, "index": c.index} for c in chunks
-        ]
+        manifest_path = self.settings.manifest_path
+        store_exists = self.settings.store_path.exists()
 
-        store = VectorStore.build(vectors, metadatas)
+        prev_hashes: dict[str, str] = {}
+        if manifest_path.exists() and not force and store_exists:
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                prev_hashes = manifest.get("file_hashes", {})
+            except Exception:
+                prev_hashes = {}
+
+        # Nếu chưa có store hoặc yêu cầu force rebuild -> Xây mới toàn bộ
+        if force or not store_exists or not prev_hashes:
+            print(f"📦 Đang xây dựng mới vector store cho {len(current_files)} file...")
+            documents = []
+            for src, (path, _) in current_files.items():
+                doc = load_single_document(path, src)
+                if doc is not None:
+                    documents.append(doc)
+
+            chunks = chunk_documents(
+                documents, self.settings.chunk_size, self.settings.chunk_overlap
+            )
+            if not chunks:
+                raise RuntimeError("Tài liệu không có nội dung văn bản để chia chunk.")
+
+            vectors = self.embedder.embed_documents([c.text for c in chunks])
+            metadatas = [
+                {"text": c.text, "source": c.source, "index": c.index} for c in chunks
+            ]
+            store = VectorStore.build(vectors, metadatas)
+            store.save(self.settings.store_path)
+
+            manifest_data = {
+                "updated_at": datetime.now().isoformat(),
+                "total_chunks": len(store),
+                "file_hashes": {src: h for src, (_, h) in current_files.items()},
+            }
+            manifest_path.write_text(
+                json.dumps(manifest_data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            self._store = store
+            return len(chunks)
+
+        # Ngược lại: Nạp bù thông minh (Incremental Update)
+        new_or_modified = {
+            src: (path, h)
+            for src, (path, h) in current_files.items()
+            if prev_hashes.get(src) != h
+        }
+        deleted = set(prev_hashes.keys()) - set(current_files.keys())
+        unchanged = {
+            src
+            for src, (_, h) in current_files.items()
+            if prev_hashes.get(src) == h
+        }
+
+        # Nếu không có file nào thay đổi
+        if not new_or_modified and not deleted:
+            print(f"✨ Không có file nào thay đổi ({len(unchanged)} file đã nạp). Vector store đã ở trạng thái mới nhất.")
+            store = self._get_store()
+            return len(store)
+
+        print("🔄 Phát hiện thay đổi trong thư mục data/raw/:")
+        for src in new_or_modified:
+            label = "cập nhật" if src in prev_hashes else "file mới"
+            print(f"   • [{label}] {src}")
+        for src in deleted:
+            print(f"   • [xóa] {src}")
+        if unchanged:
+            print(f"   • [giữ nguyên] {len(unchanged)} file")
+
+        # Nạp store hiện tại
+        store = VectorStore.load(self.settings.store_path)
+
+        # 1. Loại bỏ các chunk của file bị sửa đổi hoặc bị xóa
+        to_remove = set(new_or_modified.keys()) | deleted
+        store = store.remove_sources(to_remove)
+
+        # 2. Đọc và chia chunk cho các file mới/sửa đổi
+        new_docs = []
+        for src, (path, _) in new_or_modified.items():
+            doc = load_single_document(path, src)
+            if doc is not None:
+                new_docs.append(doc)
+
+        if new_docs:
+            new_chunks = chunk_documents(
+                new_docs, self.settings.chunk_size, self.settings.chunk_overlap
+            )
+            if new_chunks:
+                print(f"⚡ Đang nhúng {len(new_chunks)} chunk mới từ {len(new_docs)} file...")
+                new_vectors = self.embedder.embed_documents([c.text for c in new_chunks])
+                new_metadatas = [
+                    {"text": c.text, "source": c.source, "index": c.index}
+                    for c in new_chunks
+                ]
+                store = store.add_chunks(new_vectors, new_metadatas)
+
+        # Lưu store và cập nhật manifest
         store.save(self.settings.store_path)
-        self._store = store  # dùng lại luôn nếu hỏi ngay sau khi ingest
-        return len(chunks)
+        manifest_data = {
+            "updated_at": datetime.now().isoformat(),
+            "total_chunks": len(store),
+            "file_hashes": {src: h for src, (_, h) in current_files.items()},
+        }
+        manifest_path.write_text(
+            json.dumps(manifest_data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        self._store = store
+        return len(store)
 
     # ---------- GIAI ĐOẠN 2: QUERY (online) ----------
     def answer(self, question: str) -> RAGAnswer:

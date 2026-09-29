@@ -43,3 +43,26 @@ def test_vector_store_search_ranks_by_similarity():
     assert len(results) == 2
     assert results[0].text == "doc0"               # giống nhất đứng đầu
     assert results[0].score >= results[1].score    # điểm giảm dần
+
+
+def test_vector_store_remove_and_add_sources():
+    vectors = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    metas = [
+        {"text": "file1_chunk0", "source": "file1.md", "index": 0},
+        {"text": "file2_chunk0", "source": "file2.md", "index": 0},
+    ]
+    store = VectorStore.build(vectors, metas)
+    assert len(store) == 2
+    assert store.sources == {"file1.md", "file2.md"}
+
+    # Xóa file1
+    store = store.remove_sources({"file1.md"})
+    assert len(store) == 1
+    assert store.sources == {"file2.md"}
+
+    # Thêm file3
+    new_vec = np.array([[0, 0, 1]], dtype=np.float32)
+    new_meta = [{"text": "file3_chunk0", "source": "file3.md", "index": 0}]
+    store = store.add_chunks(new_vec, new_meta)
+    assert len(store) == 2
+    assert store.sources == {"file2.md", "file3.md"}

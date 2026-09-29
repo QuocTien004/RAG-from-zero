@@ -1,10 +1,10 @@
 """CLI — Nạp tài liệu vào vector store (chạy giai đoạn OFFLINE của RAG).
 
 Cách dùng:
-    python scripts/ingest.py
+    python scripts/ingest.py           # Nạp bù thông minh (chỉ nhúng file mới/sửa đổi)
+    python scripts/ingest.py --force   # Ép buộc xây dựng lại toàn bộ từ đầu
 
-Sau khi chạy xong, một vector store sẽ được lưu tại data/processed/.
-Chạy lại lệnh này mỗi khi bạn thêm/sửa tài liệu trong data/raw/.
+Sau khi chạy xong, vector store và manifest sẽ được lưu tại data/processed/.
 """
 
 import sys
@@ -17,20 +17,23 @@ except (AttributeError, ValueError):
     pass
 
 # Cho phép import package 'rag' ngay cả khi chưa 'pip install -e .'
-# (thêm thư mục src/ vào đường dẫn tìm module của Python)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rag.pipeline import RAGPipeline  # noqa: E402
 
 
 def main() -> None:
+    force = "--force" in sys.argv or "-f" in sys.argv
     pipeline = RAGPipeline()
-    print(f"📥 Đang đọc tài liệu từ: {pipeline.settings.raw_dir}")
 
-    num_chunks = pipeline.ingest()
+    print(f"📥 Đang quét tài liệu từ: {pipeline.settings.raw_dir}")
+    if force:
+        print("⚠️  Chế độ --force: Xây dựng lại toàn bộ vector store...")
 
-    print(f"✅ Đã tạo {num_chunks} chunk.")
-    print(f"💾 Vector store đã lưu tại: {pipeline.settings.store_path}")
+    num_chunks = pipeline.ingest(force=force)
+
+    print(f"✅ Hoàn tất! Tổng số chunk trong kho: {num_chunks}")
+    print(f"💾 Vector store: {pipeline.settings.store_path}")
     print('👉 Bước tiếp theo: python scripts/ask.py "câu hỏi của bạn"')
 
 

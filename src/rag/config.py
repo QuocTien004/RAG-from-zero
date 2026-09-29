@@ -34,6 +34,7 @@ class Settings:
     # --- Đường dẫn dữ liệu ---
     raw_dir: Path       # Nơi chứa tài liệu gốc (.txt, .md, .pdf)
     store_path: Path    # Nơi lưu vector store đã build
+    manifest_path: Path # Nơi lưu hash và thông tin tài liệu đã nạp (cho incremental ingestion)
 
     # --- Tham số RAG ---
     chunk_size: int
@@ -46,13 +47,15 @@ def load_settings() -> Settings:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
     data_dir = PROJECT_ROOT / "data"
+    store_dir = data_dir / "processed"
     return Settings(
         api_key=api_key,
         chat_model=os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-latest"),
         # Model embedding cục bộ (sentence-transformers) — miễn phí, không cần API
         embed_model=os.getenv("EMBED_MODEL", "intfloat/multilingual-e5-small"),
         raw_dir=data_dir / "raw",
-        store_path=data_dir / "processed" / "vector_store.npz",
+        store_path=store_dir / "vector_store.npz",
+        manifest_path=store_dir / "manifest.json",
         chunk_size=int(os.getenv("RAG_CHUNK_SIZE", "800")),
         chunk_overlap=int(os.getenv("RAG_CHUNK_OVERLAP", "120")),
         top_k=int(os.getenv("RAG_TOP_K", "4")),

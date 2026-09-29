@@ -243,13 +243,17 @@ GEMINI_CHAT_MODEL=gemini-flash-latest
 
 ### 4. Ingest tài liệu
 
-Project có sẵn hai tài liệu Markdown mẫu trong `data/raw/`:
+Hệ thống tích hợp cơ chế **Nạp bù thông minh (Incremental Ingestion)** bằng mã băm SHA-256:
 
 ```bash
+# Nạp bù thông minh: chỉ nhúng file mới hoặc vừa sửa đổi, bỏ qua file cũ
 python scripts/ingest.py
+
+# Ép buộc xây dựng lại toàn bộ vector store từ đầu:
+python scripts/ingest.py --force
 ```
 
-Lần chạy đầu, Sentence Transformers tải model embedding về cache cục bộ. Sau khi hoàn tất, vector store được tạo trong `data/processed/`.
+Lần chạy đầu, Sentence Transformers tải model embedding về cache cục bộ. Các lần sau, hệ thống tự động nhận biết file mới thêm, file bị chỉnh sửa hoặc file đã xóa để cập nhật vector store mà không phải nhúng lại toàn bộ tài liệu.
 
 ### 5. Đặt câu hỏi
 
@@ -426,7 +430,7 @@ RAG-from-zero/
 
 - [ ] Semantic hoặc token-aware chunking.
 - [ ] Relevance threshold và reranking.
-- [ ] Incremental ingestion theo document ID/hash.
+- [x] Incremental ingestion theo SHA-256 hash (nạp bù thông minh).
 - [ ] FAISS, Chroma, Qdrant hoặc pgvector backend.
 - [ ] OCR cho PDF scan.
 - [ ] Đánh giá retrieval bằng Recall@K, MRR và bộ câu hỏi chuẩn.
