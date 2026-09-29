@@ -45,7 +45,7 @@ def scan_raw_files(raw_dir: Path) -> dict[str, tuple[Path, str]]:
         if not path.is_file():
             continue
         suffix = path.suffix.lower()
-        if suffix in _TEXT_SUFFIXES or suffix == ".pdf" or suffix in _IMAGE_SUFFIXES:
+        if suffix in _TEXT_SUFFIXES or suffix in {".pdf", ".docx"} or suffix in _IMAGE_SUFFIXES:
             rel = str(path.relative_to(raw_dir)).replace("\\", "/")
             file_map[rel] = (path, compute_file_hash(path))
     return file_map
@@ -103,13 +103,75 @@ def _read_pdf_text_and_images(
     return "\n".join(text_parts), image_docs
 
 
+def _read_docx_text_and_images(
+    path: Path,
+    source_rel: str,
+    multimodal_processor=None,
+    extracted_images_dir: Path | None = None,
+) -> tuple[str, list[Document]]:
+    """Đọc văn bản từ file Word .docx và bóc tách các hình ảnh nhúng bên trong."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    text_parts: list[str] = []
+    image_docs: list[Document] = []
+    docx_stem = path.stem
+
+    try:
+        with zipfile.ZipFile(path) as z:
+            # 1. Trích xuất text từ word/document.xml
+            if "word/document.xml" in z.namelist():
+                xml_content = z.read("word/document.xml")
+                tree = ET.fromstring(xml_content)
+                for p in tree.iter():
+                    if p.tag.endswith("}p"):
+                        p_texts = [
+                            node.text
+                            for node in p.iter()
+                            if node.tag.endswith("}t") and node.text
+                        ]
+                        if p_texts:
+                            text_parts.append("".join(p_texts).strip())
+
+            # 2. Bóc tách hình ảnh trong thư mục word/media/
+            media_files = [f for f in z.namelist() if f.startswith("word/media/")]
+            if multimodal_processor and extracted_images_dir and media_files:
+                save_dir = extracted_images_dir / docx_stem
+                save_dir.mkdir(parents=True, exist_ok=True)
+                for idx, media_name in enumerate(sorted(media_files), start=1):
+                    try:
+                        img_data = z.read(media_name)
+                        img_filename = Path(media_name).name
+                        out_img_name = f"docx_img_{idx}_{img_filename}"
+                        out_img_path = save_dir / out_img_name
+                        with open(out_img_path, "wb") as f:
+                            f.write(img_data)
+
+                        rich_text = multimodal_processor.process_image(
+                            out_img_path, f"{source_rel} (hình {idx}: {img_filename})"
+                        )
+                        image_docs.append(
+                            Document(
+                                source=f"{source_rel}#img{idx}",
+                                text=rich_text,
+                                image_path=str(out_img_path),
+                            )
+                        )
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    return "\n\n".join([t for t in text_parts if t]), image_docs
+
+
 def load_file_documents(
     path: Path,
     source_rel: str,
     multimodal_processor=None,
     extracted_images_dir: Path | None = None,
 ) -> list[Document]:
-    """Đọc một file và trả về danh sách Document (hỗ trợ Text, PDF và Hình ảnh)."""
+    """Đọc một file và trả về danh sách Document (hỗ trợ Text, PDF, Word DOCX và Hình ảnh)."""
     suffix = path.suffix.lower()
     docs: list[Document] = []
 
@@ -120,6 +182,14 @@ def load_file_documents(
 
     elif suffix == ".pdf":
         text, img_docs = _read_pdf_text_and_images(
+            path, source_rel, multimodal_processor, extracted_images_dir
+        )
+        if text.strip():
+            docs.append(Document(source=source_rel, text=text.strip()))
+        docs.extend(img_docs)
+
+    elif suffix == ".docx":
+        text, img_docs = _read_docx_text_and_images(
             path, source_rel, multimodal_processor, extracted_images_dir
         )
         if text.strip():
