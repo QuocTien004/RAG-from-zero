@@ -37,7 +37,8 @@ def search_local(query: str, top_k: int = 3) -> None:
     for i, s in enumerate(results, start=1):
         img_info = f" | ảnh={s.image_path}" if s.image_path else ""
         print(f"\n[{i}] score={s.score:.4f} | nguồn={s.source}{img_info}")
-        print(f"    {s.text.strip()[:200]}...")
+        content = s.text.strip().replace("\n", "\n    ")
+        print(f"    {content}")
 
 
 def main() -> None:
