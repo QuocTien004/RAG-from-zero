@@ -10,7 +10,8 @@ from .vector_store import SearchResult
 
 # Chỉ dẫn vai trò (system) — ép model chỉ trả lời dựa trên ngữ cảnh, tránh "bịa".
 SYSTEM_PROMPT = (
-    "Bạn là trợ lý AI trả lời câu hỏi CHỈ dựa trên phần NGỮ CẢNH được cung cấp. "
+    "Bạn là trợ lý AI trả lời câu hỏi CHỈ dựa trên phần NGỮ CẢNH được cung cấp "
+    "(bao gồm cả văn bản, số liệu OCR và hình ảnh đính kèm nếu có). "
     "Nếu ngữ cảnh không chứa đủ thông tin, hãy nói rõ là bạn không tìm thấy thông tin "
     "trong tài liệu, tuyệt đối không bịa. Trả lời ngắn gọn, chính xác, bằng tiếng Việt. "
     "Khi có thể, hãy trích dẫn nguồn theo dạng [nguồn: tên_file]."
@@ -29,5 +30,8 @@ def build_context(results: list[SearchResult]) -> str:
     """Ghép các đoạn tìm được thành một khối ngữ cảnh, có đánh số và ghi nguồn."""
     blocks = []
     for i, r in enumerate(results, start=1):
-        blocks.append(f"[{i}] (nguồn: {r.source})\n{r.text}")
+        source_info = f"nguồn: {r.source}"
+        if r.image_path:
+            source_info += f", hình ảnh: {r.image_path}"
+        blocks.append(f"[{i}] ({source_info})\n{r.text}")
     return "\n\n".join(blocks)

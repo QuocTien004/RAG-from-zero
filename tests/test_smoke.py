@@ -66,3 +66,35 @@ def test_vector_store_remove_and_add_sources():
     store = store.add_chunks(new_vec, new_meta)
     assert len(store) == 2
     assert store.sources == {"file2.md", "file3.md"}
+
+
+def test_chunk_documents_preserves_image_path():
+    from rag.chunker import chunk_documents
+    from rag.loader import Document
+
+    docs = [
+        Document(source="test.txt", text="Hello world!"),
+        Document(source="chart.png", text="[HÌNH ẢNH: chart.png] Biểu đồ", image_path="data/raw/chart.png"),
+    ]
+    chunks = chunk_documents(docs, chunk_size=100, overlap=10)
+    assert len(chunks) == 2
+    assert chunks[0].image_path is None
+    assert chunks[1].image_path == "data/raw/chart.png"
+    assert chunks[1].source == "chart.png"
+
+
+def test_vector_store_retrieves_image_path():
+    from rag.prompts import build_context
+
+    vectors = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
+    metas = [
+        {"text": "Text only chunk", "source": "doc.txt", "index": 0, "image_path": None},
+        {"text": "Image chunk description", "source": "diagram.png", "index": 0, "image_path": "path/to/diagram.png"},
+    ]
+    store = VectorStore.build(vectors, metas)
+    results = store.search(np.array([0, 1, 0], dtype=np.float32), top_k=1)
+    assert len(results) == 1
+    assert results[0].image_path == "path/to/diagram.png"
+
+    context = build_context(results)
+    assert "hình ảnh: path/to/diagram.png" in context

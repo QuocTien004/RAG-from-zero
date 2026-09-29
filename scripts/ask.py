@@ -31,7 +31,8 @@ def ask_once(pipeline: RAGPipeline, question: str) -> None:
 
     print("\n📚 Nguồn tham khảo (đoạn liên quan nhất):")
     for i, s in enumerate(result.sources, start=1):
-        print(f"  [{i}] {s.source}  (điểm tương đồng: {s.score:.3f})")
+        img_info = f"\n     🖼️ Hình ảnh đính kèm: {s.image_path}" if s.image_path else ""
+        print(f"  [{i}] {s.source}  (điểm tương đồng: {s.score:.3f}){img_info}")
 
 
 def main() -> None:

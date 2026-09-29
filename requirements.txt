@@ -10,7 +10,10 @@ google-genai>=1.0.0      # SDK chính thức của Google, ở project này ch�
 # --- Tiện ích ---
 python-dotenv>=1.0.0     # Đọc biến môi trường từ file .env (API key, tên model)
 numpy>=1.26.0            # Tính toán vector & độ tương đồng cosine cho vector store
-pypdf>=4.0.0             # (Tuỳ chọn) Đọc nội dung file PDF trong data/raw
+# --- Đa phương thức & Xử lý tài liệu (Multimodal) ---
+pypdf>=4.0.0             # Đọc văn bản và trích xuất hình ảnh từ file PDF
+pillow>=10.0.0           # Đọc và xử lý tệp ảnh đa định dạng (PNG, JPG, WEBP...)
+easyocr>=1.7.0           # OCR cục bộ nhận diện chữ và bảng biểu (Tiếng Việt & Tiếng Anh)
 
 # --- Dùng cho kiểm thử (không bắt buộc khi chạy demo) ---
 pytest>=8.0.0

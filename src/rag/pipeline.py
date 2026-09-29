@@ -18,6 +18,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
+from pathlib import Path
+
 from google import genai
 from google.genai import types
 
@@ -26,7 +28,8 @@ from .chunker import chunk_documents
 from .config import Settings, load_settings
 from .embeddings import LocalEmbedder
 from .llm import GeminiLLM
-from .loader import load_documents, load_single_document, scan_raw_files
+from .loader import load_documents, load_file_documents, load_single_document, scan_raw_files
+from .multimodal import MultimodalProcessor
 from .vector_store import SearchResult, VectorStore
 
 
@@ -55,11 +58,27 @@ class RAGPipeline:
             )
         )
         self._llm: GeminiLLM | None = None
+        self._multimodal_processor: MultimodalProcessor | None = None
 
         # Embedding chạy CỤC BỘ, miễn phí — không cần API, không tốn quota
         self.embedder = LocalEmbedder(self.settings.embed_model)
 
         self._store: VectorStore | None = None  # nạp lười (lazy) khi cần
+
+    @property
+    def multimodal_processor(self) -> MultimodalProcessor:
+        """Bộ xử lý đa phương thức OCR + Vision AI (tự động fallback nếu không có API key)."""
+        if self._multimodal_processor is None:
+            client = None
+            if self.settings.api_key:
+                client = genai.Client(
+                    api_key=self.settings.api_key, http_options=self._http_options
+                )
+            self._multimodal_processor = MultimodalProcessor(
+                gemini_client=client,
+                chat_model=self.settings.chat_model,
+            )
+        return self._multimodal_processor
 
     @property
     def llm(self) -> GeminiLLM:
@@ -108,9 +127,13 @@ class RAGPipeline:
             print(f"📦 Đang xây dựng mới vector store cho {len(current_files)} file...")
             documents = []
             for src, (path, _) in current_files.items():
-                doc = load_single_document(path, src)
-                if doc is not None:
-                    documents.append(doc)
+                docs = load_file_documents(
+                    path,
+                    src,
+                    multimodal_processor=self.multimodal_processor,
+                    extracted_images_dir=self.settings.extracted_images_dir,
+                )
+                documents.extend(docs)
 
             chunks = chunk_documents(
                 documents, self.settings.chunk_size, self.settings.chunk_overlap
@@ -120,7 +143,13 @@ class RAGPipeline:
 
             vectors = self.embedder.embed_documents([c.text for c in chunks])
             metadatas = [
-                {"text": c.text, "source": c.source, "index": c.index} for c in chunks
+                {
+                    "text": c.text,
+                    "source": c.source,
+                    "index": c.index,
+                    "image_path": c.image_path,
+                }
+                for c in chunks
             ]
             store = VectorStore.build(vectors, metadatas)
             store.save(self.settings.store_path)
@@ -174,19 +203,28 @@ class RAGPipeline:
         # 2. Đọc và chia chunk cho các file mới/sửa đổi
         new_docs = []
         for src, (path, _) in new_or_modified.items():
-            doc = load_single_document(path, src)
-            if doc is not None:
-                new_docs.append(doc)
+            docs = load_file_documents(
+                path,
+                src,
+                multimodal_processor=self.multimodal_processor,
+                extracted_images_dir=self.settings.extracted_images_dir,
+            )
+            new_docs.extend(docs)
 
         if new_docs:
             new_chunks = chunk_documents(
                 new_docs, self.settings.chunk_size, self.settings.chunk_overlap
             )
             if new_chunks:
-                print(f"⚡ Đang nhúng {len(new_chunks)} chunk mới từ {len(new_docs)} file...")
+                print(f"⚡ Đang nhúng {len(new_chunks)} chunk mới từ {len(new_docs)} tài liệu...")
                 new_vectors = self.embedder.embed_documents([c.text for c in new_chunks])
                 new_metadatas = [
-                    {"text": c.text, "source": c.source, "index": c.index}
+                    {
+                        "text": c.text,
+                        "source": c.source,
+                        "index": c.index,
+                        "image_path": c.image_path,
+                    }
                     for c in new_chunks
                 ]
                 store = store.add_chunks(new_vectors, new_metadatas)
@@ -206,19 +244,31 @@ class RAGPipeline:
 
     # ---------- GIAI ĐOẠN 2: QUERY (online) ----------
     def answer(self, question: str) -> RAGAnswer:
-        """Trả lời một câu hỏi bằng quy trình Retrieve -> Generate."""
+        """Trả lời một câu hỏi bằng quy trình Retrieve -> Generate (kèm hình ảnh đa phương thức)."""
         store = self._get_store()
 
         # (a) Nhúng câu hỏi thành vector rồi tìm các đoạn liên quan nhất
         query_vector = self.embedder.embed_query(question)
         results = store.search(query_vector, self.settings.top_k)
 
-        # (b) Ghép ngữ cảnh + câu hỏi thành prompt và nhờ LLM trả lời
+        # (b) Thu thập danh sách ảnh từ các chunk tìm kiếm được (nếu có)
+        image_paths: list[Path] = []
+        for r in results:
+            if r.image_path:
+                img_p = Path(r.image_path)
+                if img_p.exists() and img_p not in image_paths:
+                    image_paths.append(img_p)
+
+        # (c) Ghép ngữ cảnh + câu hỏi thành prompt và nhờ LLM trả lời (kèm ảnh trực quan)
         context = prompts.build_context(results)
         prompt = prompts.RAG_PROMPT_TEMPLATE.format(
             context=context, question=question
         )
-        answer_text = self.llm.generate(prompt, system=prompts.SYSTEM_PROMPT)
+        answer_text = self.llm.generate(
+            prompt,
+            system=prompts.SYSTEM_PROMPT,
+            images=image_paths if image_paths else None,
+        )
 
         return RAGAnswer(answer=answer_text, sources=results)
 

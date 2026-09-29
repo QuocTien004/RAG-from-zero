@@ -66,13 +66,15 @@ flowchart TD
 
 | Khả năng | Chi tiết |
 |---|---|
-| **Pipeline minh bạch** | Mỗi bước RAG nằm trong một module nhỏ, có thể đọc và thay thế độc lập |
-| **Embedding cục bộ** | Dùng `multilingual-e5-small`, hỗ trợ tiếng Việt và không tiêu thụ API embedding |
-| **Vector store tối giản** | Lưu vector bằng NumPy, tìm kiếm cosine bằng phép nhân ma trận |
-| **Trả lời có nguồn** | Mỗi kết quả giữ tên file, nội dung chunk và điểm tương đồng |
-| **Nhiều định dạng tài liệu** | Nạp đệ quy `.txt`, `.md`, `.markdown` và `.pdf` |
+| **Hybrid Multimodal RAG** | Kết hợp 3 kỹ thuật: OCR cục bộ (EasyOCR) + Vision AI (Gemini) + Visual Grounding (gửi ảnh gốc cho LLM) |
+| **Nạp bù thông minh** | Quản lý bằng mã băm SHA-256 (`manifest.json`): chỉ nhúng file mới/sửa đổi, tự động dọn dẹp file bị xóa |
+| **Đa dạng định dạng tài liệu** | Nạp đệ quy văn bản (`.txt`, `.md`), PDF và tệp hình ảnh (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`) |
+| **Bóc tách ảnh nhúng từ PDF** | Tự động trích xuất các hình vẽ/biểu đồ trong PDF vào `data/processed/extracted_images/` để lập chỉ mục |
+| **Embedding cục bộ & Offline Search** | Dùng `multilingual-e5-small`, hỗ trợ tiếng Việt, không tốn quota API; có tool tìm kiếm 100% offline |
+| **Vector store tối giản** | Lưu vector bằng NumPy (.npz + .meta.json), tìm kiếm cosine bằng phép nhân ma trận |
+| **Trả lời trực quan có nguồn** | Mỗi kết quả giữ tên file, nội dung chunk, điểm tương đồng và đường dẫn hình ảnh đính kèm |
 | **Prompt chống bịa** | Gemini được yêu cầu chỉ dùng ngữ cảnh và nói rõ khi thiếu thông tin |
-| **Có kiểm thử offline** | Smoke tests cho chunking và semantic ranking không gọi API |
+| **Có kiểm thử offline** | Smoke tests cho chunking, retrieval và multimodal search không cần gọi API |
 
 > Thiết kế ưu tiên tính trực quan, độc lập và làm chủ toàn bộ luồng dữ liệu của kiến trúc RAG trước khi tích hợp các vector database chuyên dụng.
 
@@ -86,14 +88,16 @@ flowchart TB
     USER["Người dùng"]
 
     subgraph CLI["Command-line interface"]
-        INGEST["scripts/ingest.py"]
-        ASK["scripts/ask.py"]
+        INGEST["scripts/ingest.py<br/>(Nạp bù thông minh)"]
+        ASK["scripts/ask.py<br/>(Hỏi đáp Multimodal)"]
+        SEARCH["scripts/search_local.py<br/>(Tìm kiếm 100% Offline)"]
     end
 
     subgraph CORE["src/rag"]
         PIPELINE["RAGPipeline<br/>pipeline.py"]
         SETTINGS["Settings<br/>config.py"]
         LOADER["Document Loader<br/>loader.py"]
+        MULTIMODAL["MultimodalProcessor<br/>multimodal.py (OCR + Vision)"]
         CHUNKER["Text Chunker<br/>chunker.py"]
         EMBEDDER["LocalEmbedder<br/>embeddings.py"]
         VECTOR["VectorStore<br/>vector_store.py"]
@@ -102,19 +106,28 @@ flowchart TB
     end
 
     subgraph LOCAL["Local resources"]
-        RAW["data/raw/"]
+        RAW["data/raw/<br/>TXT · MD · PDF · PNG · JPG"]
+        EXTRACTED["data/processed/extracted_images/<br/>Ảnh trích xuất từ PDF"]
         MODEL["Sentence Transformers<br/>model cache"]
-        FILES["data/processed/<br/>vector_store.npz + metadata"]
+        EASYOCR["EasyOCR Models<br/>vi + en cache"]
+        FILES["data/processed/<br/>vector_store.npz + manifest.json"]
     end
 
-    CLOUD["Google Gemini API"]
+    CLOUD["Google Gemini API<br/>(Vision Captioning + Chat LLM)"]
 
     USER --> INGEST
     USER --> ASK
+    USER --> SEARCH
     INGEST --> PIPELINE
     ASK --> PIPELINE
+    SEARCH --> VECTOR
+    SEARCH --> EMBEDDER
     SETTINGS -. cấu hình .-> PIPELINE
     PIPELINE --> LOADER
+    LOADER --> MULTIMODAL
+    MULTIMODAL --> EXTRACTED
+    MULTIMODAL --> EASYOCR
+    MULTIMODAL -. Vision AI .-> CLOUD
     PIPELINE --> CHUNKER
     PIPELINE --> EMBEDDER
     PIPELINE <--> VECTOR
@@ -129,9 +142,9 @@ flowchart TB
     classDef core fill:#F3E8FF,stroke:#9333EA,color:#581C87;
     classDef local fill:#FFF7ED,stroke:#EA580C,color:#7C2D12;
     classDef cloud fill:#DCFCE7,stroke:#16A34A,color:#14532D;
-    class USER,INGEST,ASK interface;
-    class PIPELINE,SETTINGS,LOADER,CHUNKER,EMBEDDER,VECTOR,PROMPTS,LLM core;
-    class RAW,MODEL,FILES local;
+    class USER,INGEST,ASK,SEARCH interface;
+    class PIPELINE,SETTINGS,LOADER,MULTIMODAL,CHUNKER,EMBEDDER,VECTOR,PROMPTS,LLM core;
+    class RAW,EXTRACTED,MODEL,EASYOCR,FILES local;
     class CLOUD cloud;
 ```
 
@@ -139,27 +152,31 @@ flowchart TB
 
 | Module | Trách nhiệm |
 |---|---|
-| `config.py` | Đọc `.env`, kiểm tra API key và tập trung toàn bộ tham số RAG |
-| `loader.py` | Duyệt `data/raw/`, đọc văn bản và giữ đường dẫn nguồn tương đối |
-| `chunker.py` | Chia tài liệu theo số ký tự với phần chồng lấn cấu hình được |
-| `embeddings.py` | Tạo normalized vectors; tự thêm tiền tố `query:`/`passage:` cho model E5 |
-| `vector_store.py` | Chuẩn hóa vector, tìm kiếm cosine, lưu NPZ và metadata JSON |
-| `prompts.py` | Quản lý system prompt, RAG template và cách ghép context |
-| `llm.py` | Bao lời gọi `generate_content` của Google Gen AI SDK |
-| `pipeline.py` | Điều phối `ingest()` và `answer()`, cache vector store trong bộ nhớ |
+| `config.py` | Đọc `.env`, kiểm tra API key và tập trung toàn bộ tham số RAG (đường dẫn, kích thước chunk, top_k...) |
+| `loader.py` | Quét đệ quy `data/raw/`, bóc tách text và trích xuất hình ảnh nhúng từ PDF, hỗ trợ ảnh độc lập |
+| `multimodal.py` | Kết hợp OCR cục bộ (EasyOCR) và Gemini Vision để tạo Rich Image Chunk, lưu vết đường dẫn ảnh gốc |
+| `chunker.py` | Chia tài liệu theo số ký tự kèm overlap cấu hình được; bảo toàn liên kết `image_path` cho từng chunk |
+| `embeddings.py` | Tạo normalized vectors; tự thêm tiền tố `query:`/`passage:` cho model multilingual-e5 |
+| `vector_store.py` | Chuẩn hóa vector, tìm kiếm cosine, lưu NPZ và metadata JSON (bao gồm thuộc tính `image_path`) |
+| `prompts.py` | Quản lý system prompt, RAG template và cách ghép context (chú thích hình ảnh kèm theo) |
+| `llm.py` | Bao lời gọi `generate_content` của Google Gen AI SDK, hỗ trợ truyền hình ảnh trực quan kèm prompt |
+| `pipeline.py` | Điều phối `ingest()` (quản lý SHA-256 manifest) và `answer()` (truy xuất và gửi kèm ảnh cho LLM) |
 
 <a id="rag-hoat-dong-nhu-the-nao"></a>
 ## RAG hoạt động như thế nào?
 
-### Giai đoạn ingestion
+### Giai đoạn ingestion (Multimodal + Incremental)
 
-Chạy lại khi thêm hoặc sửa tài liệu:
+Chạy khi khởi tạo hoặc khi có tài liệu mới được thêm/sửa/xóa:
 
-1. Loader đọc đệ quy các file được hỗ trợ.
-2. Mỗi tài liệu được chia thành chunk dài `RAG_CHUNK_SIZE` ký tự.
-3. Hai chunk liền nhau chia sẻ `RAG_CHUNK_OVERLAP` ký tự để giảm mất ngữ cảnh ở biên.
-4. `LocalEmbedder` biến các chunk thành vector `float32` đã chuẩn hóa.
-5. `VectorStore` lưu vector vào `.npz` và metadata vào `.meta.json`.
+1. **Quét & So sánh Hash:** Loader tính mã băm SHA-256 của từng file trong `data/raw/` và so với `manifest.json`. File không đổi sẽ được bỏ qua.
+2. **Xử lý Đa phương thức:**
+   - **Văn bản thuần (.txt, .md):** Đọc trực tiếp nội dung UTF-8.
+   - **File PDF:** Trích xuất lớp văn bản (text layer), đồng thời bóc tách toàn bộ hình vẽ, biểu đồ nhúng bên trong vào thư mục `data/processed/extracted_images/`.
+   - **File ảnh độc lập (.png, .jpg, .webp...):** `MultimodalProcessor` dùng EasyOCR để nhận diện toàn bộ chữ, số, bảng biểu, đồng thời dùng Gemini Vision để tóm tắt ý nghĩa sơ đồ. Toàn bộ thông tin được tổng hợp thành Rich Image Chunk gắn kèm `image_path`.
+3. **Phân đoạn (Chunking):** Chia văn bản thành các đoạn nhỏ `RAG_CHUNK_SIZE` với phần chồng lấn `RAG_CHUNK_OVERLAP` ký tự.
+4. **Nhúng Vector (Embedding):** `LocalEmbedder` biến các chunk thành vector `float32` đã chuẩn hóa qua model multilingual E5.
+5. **Lưu trữ:** Lưu vector vào `.npz`, metadata kèm đường dẫn ảnh vào `.meta.json`, và ghi nhận trạng thái vào `manifest.json`.
 
 ### Giai đoạn query
 
@@ -269,20 +286,29 @@ Mở chế độ hỏi đáp liên tục:
 python scripts/ask.py
 ```
 
-Kết quả gồm câu trả lời, danh sách chunk nguồn và điểm tương đồng cosine của từng chunk.
+Nếu câu trả lời liên quan tới sơ đồ/hình ảnh, kết quả sẽ hiển thị đường dẫn `🖼️ Hình ảnh đính kèm` và gửi trực tiếp hình ảnh gốc cho Gemini LLM để trả lời trực quan.
+
+### 6. Tìm kiếm ngữ nghĩa 100% Offline (Không cần API)
+
+```bash
+python scripts/search_local.py "Muốn model biết dữ liệu mới mà không fine-tune thì làm gì?"
+```
+
+Chạy hoàn toàn cục bộ trên máy tính (sử dụng vector store NumPy + model embedding E5), không tốn quota hay cần API key.
 
 <a id="su-dung-tai-lieu-rieng"></a>
 ## Sử dụng tài liệu riêng
 
 1. Chép file vào `data/raw/`; có thể tổ chức thành nhiều thư mục con.
-2. Chạy lại `python scripts/ingest.py` để xây dựng lại toàn bộ vector store.
-3. Chạy `python scripts/ask.py` và đặt câu hỏi liên quan tới tài liệu.
+2. Chạy `python scripts/ingest.py` (hệ thống sẽ tự nhận biết file mới/sửa đổi qua SHA-256).
+3. Chạy `python scripts/ask.py` hoặc `python scripts/search_local.py`.
 
 | Định dạng | Cách xử lý | Lưu ý |
 |---|---|---|
 | `.txt` | Đọc trực tiếp dưới dạng UTF-8 | File encoding khác UTF-8 có thể gây lỗi |
 | `.md`, `.markdown` | Đọc như văn bản thuần | Markdown syntax được giữ trong chunk |
-| `.pdf` | Trích xuất text layer bằng `pypdf` | PDF scan dạng ảnh chưa được OCR |
+| `.pdf` | Trích xuất text layer + tự động bóc tách hình ảnh nhúng vào `data/processed/extracted_images/` | Hình ảnh bóc tách được phân tích tự động bằng OCR + Vision |
+| `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp` | Phân tích kết hợp EasyOCR (chữ/bảng số liệu) và Gemini Vision (ngữ nghĩa biểu đồ/sơ đồ) | Tạo Rich Image Chunk và lưu vết đường dẫn ảnh gốc để truy xuất |
 
 File rỗng và định dạng không hỗ trợ được bỏ qua. Tên nguồn trong kết quả là đường dẫn tương đối tính từ `data/raw/`.
 
@@ -304,7 +330,7 @@ Embedding không tiêu thụ quota Gemini. Tuy nhiên, lần chạy đầu phả
 
 | Biến | Mặc định | Mô tả |
 |---|---:|---|
-| `GEMINI_API_KEY` | Bắt buộc | API key dùng cho bước generation |
+| `GEMINI_API_KEY` | Bắt buộc (khi chat) | API key dùng cho bước generation và Vision captioning |
 | `GEMINI_CHAT_MODEL` | `gemini-flash-latest` | Model Gemini sinh câu trả lời |
 | `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Sentence Transformers model chạy cục bộ |
 | `RAG_CHUNK_SIZE` | `800` | Số ký tự tối đa trong mỗi chunk |
@@ -331,10 +357,10 @@ result = pipeline.answer("RAG giải quyết vấn đề gì?")
 
 print(result.answer)
 for source in result.sources:
-    print(source.source, source.score)
+    print(source.source, source.score, source.image_path)
 ```
 
-`ingest()` trả về số chunk đã tạo. `answer()` trả về `RAGAnswer` gồm văn bản trả lời và danh sách `SearchResult` đã dùng.
+`ingest()` trả về số chunk đã tạo. `answer()` trả về `RAGAnswer` gồm văn bản trả lời và danh sách `SearchResult` đã dùng (kèm `image_path` nếu có).
 
 <a id="kiem-thu"></a>
 ## Kiểm thử
@@ -343,11 +369,14 @@ for source in result.sources:
 python -m pytest
 ```
 
-Ba smoke tests hiện tại kiểm tra:
+Bộ 6 smoke tests kiểm tra:
 
 - Chunk không vượt quá kích thước cấu hình và giữ đúng phần overlap.
 - Chuỗi rỗng không sinh chunk.
 - Vector store xếp hạng kết quả đúng theo cosine similarity.
+- Vector store thêm và loại bỏ nguồn (incremental update) chính xác.
+- Bảo toàn `image_path` khi chia chunk cho tài liệu đa phương thức.
+- Truy xuất vector store và định dạng ngữ cảnh kèm đường dẫn hình ảnh đính kèm.
 
 Các test dùng vector giả lập, không tải embedding model, không gọi Gemini và không tiêu thụ API quota.
 
@@ -361,22 +390,26 @@ RAG-from-zero/
 │   │   ├── 01-rag-la-gi.md
 │   │   └── 02-embedding-va-vector-store.md
 │   └── processed/
-│       └── .gitkeep
+│       ├── extracted_images/ # Thư mục lưu ảnh trích xuất từ PDF
+│       ├── manifest.json     # Quản lý hash SHA-256 nạp bù
+│       └── vector_store.npz  # Vector store + .meta.json
 ├── scripts/
-│   ├── ingest.py             # Xây dựng lại vector store
-│   └── ask.py                # Hỏi một câu hoặc chat liên tục
+│   ├── ingest.py             # Nạp bù thông minh vào vector store
+│   ├── ask.py                # Hỏi đáp Multimodal RAG với Gemini
+│   └── search_local.py       # Tìm kiếm ngữ nghĩa 100% offline
 ├── src/rag/
 │   ├── __init__.py           # Public package API
 │   ├── config.py             # Environment settings
-│   ├── loader.py             # TXT, Markdown và PDF loader
-│   ├── chunker.py            # Character-based chunking
+│   ├── loader.py             # TXT, Markdown, PDF và Image loader
+│   ├── multimodal.py         # EasyOCR cục bộ + Gemini Vision processor
+│   ├── chunker.py            # Character-based chunking kèm image_path
 │   ├── embeddings.py         # Local Sentence Transformers embeddings
-│   ├── vector_store.py       # NumPy cosine search + persistence
-│   ├── prompts.py            # System prompt và RAG template
-│   ├── llm.py                # Gemini generation adapter
-│   └── pipeline.py           # RAGPipeline orchestration
+│   ├── vector_store.py       # NumPy cosine search + metadata image persistence
+│   ├── prompts.py            # System prompt và RAG template có visual context
+│   ├── llm.py                # Gemini adapter hỗ trợ truyền hình ảnh trực quan
+│   └── pipeline.py           # RAGPipeline điều phối Ingestion & Query
 ├── tests/
-│   └── test_smoke.py
+│   └── test_smoke.py         # 6 smoke unit tests offline
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml
@@ -384,55 +417,50 @@ RAG-from-zero/
 └── README.md
 ```
 
-Để đọc code theo đúng luồng dữ liệu: `config.py` → `loader.py` → `chunker.py` → `embeddings.py` → `vector_store.py` → `prompts.py` → `llm.py` → `pipeline.py`.
+Để đọc code theo đúng luồng dữ liệu: `config.py` → `multimodal.py` → `loader.py` → `chunker.py` → `embeddings.py` → `vector_store.py` → `prompts.py` → `llm.py` → `pipeline.py`.
 
 <a id="quyet-dinh-thiet-ke"></a>
 ## Quyết định thiết kế
 
-- **NumPy thay cho vector database:** cho thấy retrieval thực chất là chuẩn hóa vector, nhân ma trận và sắp xếp điểm.
-- **Character chunking:** dễ quan sát và cấu hình; phù hợp bài nhập môn trước khi chuyển sang semantic/token chunking.
-- **Local embeddings:** giảm phụ thuộc API và tách rõ retrieval khỏi generation.
-- **E5 query/passage prefixes:** tuân theo cách sử dụng của họ model E5 để cải thiện chất lượng retrieval.
-- **NPZ + JSON:** vector và metadata dễ kiểm tra, xóa và tái tạo mà không cần dịch vụ ngoài.
-- **Lazy-load vector store:** chỉ đọc dữ liệu từ đĩa khi `answer()` thực sự được gọi, sau đó cache trong pipeline.
-- **Prompt tập trung:** chỉ dẫn grounding và template nằm riêng, không trộn vào logic điều phối.
+- **Hybrid Multimodal RAG:** Kết hợp cả 3 kỹ thuật: OCR trích xuất chữ/số liệu bảng biểu + Vision AI đọc hiểu biểu đồ ngữ nghĩa + Visual LLM Grounding (gửi ảnh gốc cho LLM lúc trả lời).
+- **Incremental Ingestion (SHA-256):** Tự động phát hiện file mới, sửa đổi hoặc xóa; chỉ nhúng các file thay đổi, tiết kiệm thời gian và tài nguyên CPU.
+- **NumPy thay cho vector database:** Cho thấy retrieval thực chất là chuẩn hóa vector, nhân ma trận và sắp xếp điểm.
+- **Local embeddings:** Giảm phụ thuộc API và tách rõ retrieval khỏi generation.
+- **E5 query/passage prefixes:** Tuân theo cách sử dụng của họ model E5 để tối ưu chất lượng retrieval.
+- **NPZ + JSON:** Vector và metadata dễ kiểm tra, xóa và tái tạo mà không cần dịch vụ ngoài.
 
 <a id="gioi-han-va-an-toan"></a>
 ## Giới hạn và lưu ý an toàn
 
 - Retrieval luôn lấy `top_k` kết quả, chưa có ngưỡng relevance tối thiểu hoặc reranker.
-- Ingestion xây dựng lại toàn bộ store; chưa hỗ trợ cập nhật/xóa tài liệu theo từng phần.
-- Chunking theo ký tự có thể cắt giữa câu hoặc cấu trúc Markdown.
-- PDF ảnh scan không có text layer cần OCR trước khi ingest.
-- NumPy search phù hợp demo hoặc tập dữ liệu nhỏ; chưa tối ưu cho hàng triệu vector.
-- Câu hỏi và các chunk được truy xuất sẽ được gửi tới Gemini. Không dùng tài liệu nhạy cảm nếu chưa đánh giá chính sách dữ liệu của provider.
-- Metadata được nạp từ file JSON cục bộ; chỉ sử dụng vector store do bạn tạo hoặc tin cậy.
-- Project chưa có authentication, rate limiting, telemetry hoặc giao diện web.
+- EasyOCR chạy trên CPU tiêu thụ RAM và thời gian khởi tạo lần đầu; có thể bật GPU nếu môi trường hỗ trợ CUDA.
+- NumPy search phù hợp demo hoặc tập dữ liệu vừa và nhỏ (< 50,000 chunks); hệ thống lớn nên dùng FAISS/Qdrant.
+- Câu hỏi và các chunk được truy xuất sẽ được gửi tới Gemini khi dùng `ask.py`. Không dùng tài liệu nhạy cảm nếu chưa đánh giá chính sách dữ liệu.
 
 <a id="xu-ly-loi-thuong-gap"></a>
 ## Xử lý lỗi thường gặp
 
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |---|---|---|
-| `Thiếu GEMINI_API_KEY` | Chưa tạo `.env` hoặc key đang trống | Sao chép `.env.example`, điền key rồi chạy lại |
+| `Thiếu GEMINI_API_KEY` | Chưa tạo `.env` hoặc key đang trống | Sao chép `.env.example`, điền key rồi chạy lại (chỉ cần khi dùng `ask.py`) |
 | `Chưa có vector store` | Chưa chạy ingestion | Chạy `python scripts/ingest.py` trước khi hỏi |
-| `Không tìm thấy tài liệu nào` | `data/raw/` không có file được hỗ trợ | Thêm TXT, Markdown hoặc PDF rồi ingest lại |
+| `Không tìm thấy tài liệu nào` | `data/raw/` không có file được hỗ trợ | Thêm TXT, Markdown, PDF hoặc ảnh rồi ingest lại |
 | `overlap phải nhỏ hơn chunk_size` | Cấu hình overlap không hợp lệ | Giảm `RAG_CHUNK_OVERLAP` hoặc tăng `RAG_CHUNK_SIZE` |
 | `ModuleNotFoundError` | Chưa kích hoạt `.venv` hoặc thiếu dependencies | Kích hoạt venv và chạy `pip install -r requirements.txt` |
-| Lần ingest đầu chạy lâu | Đang tải và khởi tạo embedding model | Chờ tải xong; các lần sau dùng cache cục bộ |
-| PDF không sinh nội dung | File là ảnh scan hoặc text layer lỗi | OCR file trước khi đưa vào `data/raw/` |
+| Lần ingest đầu chạy lâu | Đang tải model embedding và model EasyOCR | Chờ tải xong; các lần sau dùng cache cục bộ |
 | `429` hoặc `RESOURCE_EXHAUSTED` | Hết quota hay rate limit Gemini | Chờ rồi thử lại hoặc kiểm tra quota/billing |
 | `5xx` từ Gemini | Dịch vụ tạm thời không khả dụng | Client tự retry có giới hạn; thử lại sau nếu vẫn lỗi |
-| Trả lời không liên quan | Chunking/top-k chưa phù hợp hoặc thiếu tài liệu | Điều chỉnh cấu hình, thêm dữ liệu hoặc bổ sung reranker |
 
 <a id="lo-trinh"></a>
 ## Lộ trình mở rộng
 
 - [ ] Semantic hoặc token-aware chunking.
-- [ ] Relevance threshold và reranking.
+- [ ] Relevance threshold và reranking (bằng cross-encoder).
 - [x] Incremental ingestion theo SHA-256 hash (nạp bù thông minh).
+- [x] Hybrid Multimodal RAG (kết hợp EasyOCR cục bộ + Gemini Vision).
+- [x] Tự động bóc tách hình ảnh nhúng từ tệp PDF.
+- [x] Visual LLM Grounding (gửi hình ảnh đính kèm cho mô hình sinh).
 - [ ] FAISS, Chroma, Qdrant hoặc pgvector backend.
-- [ ] OCR cho PDF scan.
 - [ ] Đánh giá retrieval bằng Recall@K, MRR và bộ câu hỏi chuẩn.
 - [ ] Streaming response và giao diện web.
 - [ ] Mở rộng thành AI Agent: điều phối nhiều tool qua Gemini, Claude hoặc OpenAI.

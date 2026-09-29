@@ -35,7 +35,8 @@ def search_local(query: str, top_k: int = 3) -> None:
 
     print("\n📚 Kết quả truy xuất (Retrieval Local):")
     for i, s in enumerate(results, start=1):
-        print(f"\n[{i}] score={s.score:.4f} | nguồn={s.source}")
+        img_info = f" | ảnh={s.image_path}" if s.image_path else ""
+        print(f"\n[{i}] score={s.score:.4f} | nguồn={s.source}{img_info}")
         print(f"    {s.text.strip()[:200]}...")
 
 

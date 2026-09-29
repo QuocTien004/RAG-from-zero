@@ -20,9 +20,10 @@ from .loader import Document
 class Chunk:
     """Một đoạn văn bản nhỏ, kèm nguồn gốc để truy vết."""
 
-    source: str  # File gốc
-    index: int   # Thứ tự đoạn trong file (0, 1, 2, ...)
-    text: str    # Nội dung đoạn
+    source: str                   # File gốc
+    index: int                    # Thứ tự đoạn trong file (0, 1, 2, ...)
+    text: str                     # Nội dung đoạn
+    image_path: str | None = None # Đường dẫn ảnh gốc (nếu có)
 
 
 def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
@@ -57,5 +58,12 @@ def chunk_documents(
     all_chunks: list[Chunk] = []
     for doc in documents:
         for i, piece in enumerate(chunk_text(doc.text, chunk_size, overlap)):
-            all_chunks.append(Chunk(source=doc.source, index=i, text=piece))
+            all_chunks.append(
+                Chunk(
+                    source=doc.source,
+                    index=i,
+                    text=piece,
+                    image_path=doc.image_path,
+                )
+            )
     return all_chunks

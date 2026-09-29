@@ -24,11 +24,12 @@ import numpy as np
 
 @dataclass
 class SearchResult:
-    """Một kết quả tìm kiếm: đoạn văn + nguồn + điểm tương đồng."""
+    """Một kết quả tìm kiếm: đoạn văn + nguồn + điểm tương đồng + đường dẫn ảnh (nếu có)."""
 
     text: str
     source: str
     score: float
+    image_path: str | None = None
 
 
 class VectorStore:
@@ -104,6 +105,7 @@ class VectorStore:
                     text=meta["text"],
                     source=meta["source"],
                     score=float(scores[i]),
+                    image_path=meta.get("image_path"),
                 )
             )
         return results
