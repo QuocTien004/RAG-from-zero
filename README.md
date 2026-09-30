@@ -36,19 +36,19 @@ Project triển khai RAG thành hai pipeline độc lập:
 flowchart TD
     subgraph OFFLINE["1. Ingestion Pipeline (Offline)"]
         direction LR
-        RAW["Tài liệu gốc<br/>TXT · MD · PDF"] --> LOAD["Load"]
-        LOAD --> CHUNK["Chunk<br/>có overlap"]
-        CHUNK --> DOCEMBED["Local Embedding<br/>E5 Passage"]
+        RAW["Tài liệu gốc<br/>TXT · MD · PDF · DOCX · Ảnh"] --> LOAD["Load & OCR / Vision"]
+        LOAD --> CHUNK["Chunk<br/>kèm image_path"]
+        CHUNK --> DOCEMBED["Local Embedding<br/>E5 Passage (0đ API)"]
         DOCEMBED --> STORE[("Vector Store<br/>NPZ + JSON")]
     end
 
-    subgraph ONLINE["2. Query Pipeline (Online)"]
+    subgraph ONLINE["2. Query Pipeline (Online / Offline)"]
         direction LR
         QUESTION["Câu hỏi"] --> QEMBED["Embed Query<br/>E5 Query"]
         QEMBED --> RETRIEVE["Cosine Search<br/>Top-K chunks"]
         RETRIEVE --> CONTEXT["Context + Prompt"]
-        CONTEXT --> GEMINI["Gemini LLM<br/>Generation"]
-        GEMINI --> ANSWER["Câu trả lời<br/>kèm nguồn"]
+        CONTEXT --> LLM["LLM Generation<br/>Ollama (Offline) / Gemini (Cloud)"]
+        LLM --> ANSWER["Câu trả lời rút gọn<br/>kèm trích dẫn nguồn"]
     end
 
     STORE ==>|Nạp vector| RETRIEVE
@@ -58,7 +58,7 @@ flowchart TD
     classDef storage fill:#FFF7ED,stroke:#EA580C,color:#7C2D12,stroke-width:2px;
     classDef output fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px;
     class RAW,QUESTION input;
-    class LOAD,CHUNK,DOCEMBED,QEMBED,RETRIEVE,CONTEXT,GEMINI process;
+    class LOAD,CHUNK,DOCEMBED,QEMBED,RETRIEVE,CONTEXT,LLM process;
     class STORE storage;
     class ANSWER output;
 ```
@@ -83,7 +83,7 @@ flowchart TD
 <a id="kien-truc-he-thong"></a>
 ## Kiến trúc hệ thống
 
-`RAGPipeline` là composition root kết nối các module. Phần embedding và retrieval chạy trên máy; chỉ prompt cuối gồm câu hỏi cùng các chunk được truy xuất mới được gửi tới Gemini.
+`RAGPipeline` là composition root kết nối các module. Toàn bộ khâu embedding, OCR và vector search chạy 100% cục bộ; khâu sinh câu trả lời hỗ trợ linh hoạt giữa **Ollama (chạy offline trên GPU/RAM máy bạn)** và **Google Gemini (Cloud API)**.
 
 ```mermaid
 flowchart TB
@@ -91,7 +91,7 @@ flowchart TB
 
     subgraph CLI["Command-line interface"]
         INGEST["scripts/ingest.py<br/>(Nạp bù thông minh)"]
-        ASK["scripts/ask.py<br/>(Hỏi đáp Multimodal)"]
+        ASK["scripts/ask.py<br/>(Hỏi đáp Đa phương thức)"]
         SEARCH["scripts/search_local.py<br/>(Tìm kiếm 100% Offline)"]
     end
 
@@ -104,18 +104,19 @@ flowchart TB
         EMBEDDER["LocalEmbedder<br/>embeddings.py"]
         VECTOR["VectorStore<br/>vector_store.py"]
         PROMPTS["Prompt Library<br/>prompts.py"]
-        LLM["GeminiLLM<br/>llm.py"]
+        LLM["Dual LLM Engine<br/>OllamaLLM / GeminiLLM (llm.py)"]
     end
 
-    subgraph LOCAL["Local resources"]
-        RAW["data/raw/<br/>TXT · MD · PDF · PNG · JPG"]
-        EXTRACTED["data/processed/extracted_images/<br/>Ảnh trích xuất từ PDF"]
-        MODEL["Sentence Transformers<br/>model cache"]
+    subgraph LOCAL["Local resources (100% Offline)"]
+        RAW["data/raw/<br/>TXT · MD · PDF · DOCX · PNG · JPG"]
+        EXTRACTED["data/processed/extracted_images/<br/>Ảnh trích xuất từ PDF / DOCX"]
+        MODEL["Sentence Transformers<br/>model cache (E5)"]
         EASYOCR["EasyOCR Models<br/>vi + en cache"]
+        OLLAMA["Ollama Local Server<br/>(Qwen2.5:3b / 7b trên GPU)"]
         FILES["data/processed/<br/>vector_store.npz + manifest.json"]
     end
 
-    CLOUD["Google Gemini API<br/>(Vision Captioning + Chat LLM)"]
+    CLOUD["Google Gemini API<br/>(Cloud LLM / Vision Option)"]
 
     USER --> INGEST
     USER --> ASK
@@ -138,6 +139,7 @@ flowchart TB
     RAW --> LOADER
     MODEL --> EMBEDDER
     VECTOR <--> FILES
+    LLM <--> OLLAMA
     LLM <--> CLOUD
 
     classDef interface fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E;
@@ -146,7 +148,7 @@ flowchart TB
     classDef cloud fill:#DCFCE7,stroke:#16A34A,color:#14532D;
     class USER,INGEST,ASK,SEARCH interface;
     class PIPELINE,SETTINGS,LOADER,MULTIMODAL,CHUNKER,EMBEDDER,VECTOR,PROMPTS,LLM core;
-    class RAW,EXTRACTED,MODEL,EASYOCR,FILES local;
+    class RAW,EXTRACTED,MODEL,EASYOCR,OLLAMA,FILES local;
     class CLOUD cloud;
 ```
 
@@ -154,14 +156,14 @@ flowchart TB
 
 | Module | Trách nhiệm |
 |---|---|
-| `config.py` | Đọc `.env`, kiểm tra API key và tập trung toàn bộ tham số RAG (đường dẫn, kích thước chunk, top_k...) |
-| `loader.py` | Quét đệ quy `data/raw/`, bóc tách text và trích xuất hình ảnh nhúng từ PDF, hỗ trợ ảnh độc lập |
+| `config.py` | Đọc `.env`, tự động chọn `LLM_PROVIDER` (`ollama` / `gemini`), cấu hình kích thước chunk, top_k... |
+| `loader.py` | Quét đệ quy `data/raw/`, bóc tách text và ảnh nhúng từ PDF & Word (`.docx`), hỗ trợ tệp ảnh độc lập |
 | `multimodal.py` | Kết hợp OCR cục bộ (EasyOCR) và Gemini Vision để tạo Rich Image Chunk, lưu vết đường dẫn ảnh gốc |
 | `chunker.py` | Chia tài liệu theo số ký tự kèm overlap cấu hình được; bảo toàn liên kết `image_path` cho từng chunk |
 | `embeddings.py` | Tạo normalized vectors; tự thêm tiền tố `query:`/`passage:` cho model multilingual-e5 |
 | `vector_store.py` | Chuẩn hóa vector, tìm kiếm cosine, lưu NPZ và metadata JSON (bao gồm thuộc tính `image_path`) |
 | `prompts.py` | Quản lý system prompt, RAG template và cách ghép context (chú thích hình ảnh kèm theo) |
-| `llm.py` | Bao lời gọi `generate_content` của Google Gen AI SDK, hỗ trợ truyền hình ảnh trực quan kèm prompt |
+| `llm.py` | Quản lý Dual LLM: `OllamaLLM` (100% offline, 0đ API) và `GeminiLLM` (Cloud API), hỗ trợ multimodal |
 | `pipeline.py` | Điều phối `ingest()` (quản lý SHA-256 manifest) và `answer()` (truy xuất và gửi kèm ảnh cho LLM) |
 
 <a id="rag-hoat-dong-nhu-the-nao"></a>
@@ -190,7 +192,7 @@ sequenceDiagram
     participant Embedder as LocalEmbedder
     participant Store as VectorStore
     participant Prompt as Prompt Library
-    participant Gemini as Gemini API
+    participant LLM as LLM Engine (Ollama / Gemini)
 
     User->>Pipeline: answer(question)
     Pipeline->>Embedder: embed_query(question)
@@ -199,12 +201,13 @@ sequenceDiagram
     Store-->>Pipeline: chunks + sources + cosine scores
     Pipeline->>Prompt: build_context(results)
     Prompt-->>Pipeline: grounded RAG prompt
-    Pipeline->>Gemini: system instruction + prompt
-    Gemini-->>Pipeline: generated answer
+    Pipeline->>LLM: system instruction + prompt (+ images)
+    LLM-->>Pipeline: generated answer
     Pipeline-->>User: RAGAnswer(answer, sources)
 ```
 
-Gemini client retry tối đa bốn lần cho các lỗi tạm thời `429`, `500`, `502`, `503` và `504`, với thời gian chờ tăng dần nhưng được giới hạn.
+- **Khi dùng Ollama (Cục bộ):** Gửi yêu cầu qua REST API nội bộ `http://localhost:11434`, sinh câu trả lời trực tiếp từ máy cá nhân, bảo mật 100% dữ liệu và hoàn toàn miễn phí.
+- **Khi dùng Google Gemini (Cloud):** Gửi request trực tiếp đến Google AI Studio; tự động retry tối đa 4 lần cho các mã lỗi tạm thời `429`, `500`, `502`, `503`, `504` với thuật toán exponential backoff và jitter ngẫu nhiên.
 
 <a id="bat-dau-nhanh"></a>
 ## Bắt đầu nhanh
@@ -212,9 +215,11 @@ Gemini client retry tối đa bốn lần cho các lỗi tạm thời `429`, `50
 ### Yêu cầu
 
 - Python **3.10+**
-- Một Google Gemini API key
-- Dung lượng trống cho model embedding và Python dependencies
-- Kết nối mạng trong lần đầu tải model embedding và khi gọi Gemini
+- Chọn 1 trong 2 LLM Engine:
+  - **Ollama (Khuyên dùng - 100% Offline, Bảo mật):** Đã cài đặt [Ollama](https://ollama.com/) và tải model (ví dụ: `ollama run qwen2.5:3b`).
+  - **Google Gemini API (Cloud):** Có API key từ [Google AI Studio](https://aistudio.google.com/).
+- Dung lượng trống cho model embedding cục bộ (`multilingual-e5-small`) và dependencies.
+- Kết nối mạng trong lần đầu tải model embedding (và khi gọi Gemini nếu dùng Cloud).
 
 ### 1. Clone repository
 
@@ -249,16 +254,29 @@ cp .env.example .env
 
 </details>
 
-### 3. Cấu hình Gemini
+### 3. Cấu hình LLM & Môi trường
 
-Mở `.env` và điền API key:
+Mở file `.env` vừa sao chép và thiết lập mô hình mong muốn:
 
 ```dotenv
-GEMINI_API_KEY=your_api_key_here
-GEMINI_CHAT_MODEL=gemini-flash-latest
+# ==========================================
+# CẤU HÌNH LLM ENGINE (Dual Provider)
+# ==========================================
+
+# Lựa chọn 1: Dùng Ollama Cục bộ (0đ API, 100% Offline, Bảo mật)
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen2.5:3b
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Lựa chọn 2: Dùng Google Gemini API (Cloud)
+# LLM_PROVIDER=gemini
+# GEMINI_API_KEY=your_api_key_here
+# GEMINI_CHAT_MODEL=gemini-flash-latest
 ```
 
-> **Bảo mật:** `.env` đã được Git bỏ qua. Không commit, chụp màn hình hoặc chia sẻ API key. Dù ingestion không gọi Gemini, phiên bản hiện tại vẫn kiểm tra key khi khởi tạo pipeline.
+> **Tự động nhận diện (Auto-detect):** Nếu không điền `LLM_PROVIDER`, hệ thống sẽ tự động dùng Gemini nếu có `GEMINI_API_KEY`, hoặc tự động chuyển sang Ollama cục bộ nếu không tìm thấy key.
+>
+> **Bảo mật:** `.env` đã được Git bỏ qua (`.gitignore`). Tuyệt đối không commit hoặc chia sẻ API key cá nhân.
 
 ### 4. Ingest tài liệu
 
@@ -274,29 +292,30 @@ python scripts/ingest.py --force
 
 Lần chạy đầu, Sentence Transformers tải model embedding về cache cục bộ. Các lần sau, hệ thống tự động nhận biết file mới thêm, file bị chỉnh sửa hoặc file đã xóa để cập nhật vector store mà không phải nhúng lại toàn bộ tài liệu.
 
-### 5. Đặt câu hỏi
+### 5. Đặt câu hỏi (RAG Q&A)
 
-Hỏi một câu rồi thoát:
+Hỏi một câu trực tiếp từ dòng lệnh:
 
 ```bash
 python scripts/ask.py "RAG gồm những bước nào?"
 ```
 
-Mở chế độ hỏi đáp liên tục:
+Mở chế độ hỏi đáp tương tác liên tục:
 
 ```bash
 python scripts/ask.py
 ```
 
-Nếu câu trả lời liên quan tới sơ đồ/hình ảnh, kết quả sẽ hiển thị đường dẫn `🖼️ Hình ảnh đính kèm` và gửi trực tiếp hình ảnh gốc cho Gemini LLM để trả lời trực quan.
+- Hệ thống sẽ tự động truy xuất các chunk phù hợp nhất từ Vector Store cục bộ và gửi kèm ngữ cảnh tới LLM Engine đã cấu hình (Ollama hoặc Gemini).
+- Nếu câu trả lời liên quan tới sơ đồ/hình ảnh, kết quả sẽ hiển thị đường dẫn `🖼️ Hình ảnh đính kèm` (với Gemini sẽ gửi trực tiếp hình ảnh gốc để mô hình phân tích trực quan).
 
-### 6. Tìm kiếm ngữ nghĩa 100% Offline (Không cần API)
+### 6. Tìm kiếm ngữ nghĩa 100% Offline (Không cần LLM)
 
 ```bash
 python scripts/search_local.py "Muốn model biết dữ liệu mới mà không fine-tune thì làm gì?"
 ```
 
-Chạy hoàn toàn cục bộ trên máy tính (sử dụng vector store NumPy + model embedding E5), không tốn quota hay cần API key.
+Chạy hoàn toàn cục bộ trên máy tính (sử dụng vector store NumPy + model embedding E5), hiển thị chi tiết điểm cosine similarity, nguồn file và toàn bộ nội dung chunk liên quan mà không cần gọi bất kỳ LLM nào.
 
 <a id="su-dung-tai-lieu-rieng"></a>
 ## Sử dụng tài liệu riêng
@@ -309,6 +328,7 @@ Chạy hoàn toàn cục bộ trên máy tính (sử dụng vector store NumPy +
 |---|---|---|
 | `.txt` | Đọc trực tiếp dưới dạng UTF-8 | File encoding khác UTF-8 có thể gây lỗi |
 | `.md`, `.markdown` | Đọc như văn bản thuần | Markdown syntax được giữ trong chunk |
+| `.docx` | Trích xuất toàn bộ text layer và tự động bóc tách hình ảnh nhúng từ `word/media/` vào `data/processed/extracted_images/` | Hoàn toàn dùng thư viện chuẩn Python (`zipfile` & `xml.etree.ElementTree`), không cần phụ thuộc bên ngoài |
 | `.pdf` | Trích xuất text layer + tự động bóc tách hình ảnh nhúng vào `data/processed/extracted_images/` | Hình ảnh bóc tách được phân tích tự động bằng OCR + Vision |
 | `.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp` | Phân tích kết hợp EasyOCR (chữ/bảng số liệu) và Gemini Vision (ngữ nghĩa biểu đồ/sơ đồ) | Tạo Rich Image Chunk và lưu vết đường dẫn ảnh gốc để truy xuất |
 
@@ -374,16 +394,18 @@ for source in result.sources:
 python -m pytest
 ```
 
-Bộ 6 smoke tests kiểm tra:
+Bộ 8 smoke unit tests chạy hoàn toàn offline và không phụ thuộc API bên ngoài:
 
-- Chunk không vượt quá kích thước cấu hình và giữ đúng phần overlap.
-- Chuỗi rỗng không sinh chunk.
-- Vector store xếp hạng kết quả đúng theo cosine similarity.
-- Vector store thêm và loại bỏ nguồn (incremental update) chính xác.
-- Bảo toàn `image_path` khi chia chunk cho tài liệu đa phương thức.
-- Truy xuất vector store và định dạng ngữ cảnh kèm đường dẫn hình ảnh đính kèm.
+- **Chunk size & overlap:** Chunk không vượt quá kích thước cấu hình và giữ đúng phần overlap.
+- **Empty input:** Chuỗi rỗng không sinh chunk.
+- **Cosine ranking:** Vector store xếp hạng kết quả đúng theo cosine similarity.
+- **Incremental update:** Vector store thêm và loại bỏ nguồn (incremental update) chính xác.
+- **Multimodal chunking:** Bảo toàn `image_path` khi chia chunk cho tài liệu đa phương thức.
+- **Image path retrieval:** Truy xuất vector store và định dạng ngữ cảnh kèm đường dẫn hình ảnh đính kèm.
+- **LLM Provider detection:** Tự động nhận diện cấu hình `llm_provider` (`ollama` hoặc `gemini`).
+- **Ollama initialization:** Khởi tạo `OllamaLLM` với model và base URL mặc định chuẩn xác.
 
-Các test dùng vector giả lập, không tải embedding model, không gọi Gemini và không tiêu thụ API quota.
+Các test dùng vector giả lập, không tải embedding model, không gọi LLM bên ngoài và không tiêu thụ API quota.
 
 <a id="cau-truc-thu-muc"></a>
 ## Cấu trúc thư mục
@@ -391,30 +413,28 @@ Các test dùng vector giả lập, không tải embedding model, không gọi G
 ```text
 RAG-from-zero/
 ├── data/
-│   ├── raw/
-│   │   ├── 01-rag-la-gi.md
-│   │   └── 02-embedding-va-vector-store.md
+│   ├── raw/                  # Thư mục tài liệu đầu vào (.txt, .md, .pdf, .docx, ảnh)
 │   └── processed/
-│       ├── extracted_images/ # Thư mục lưu ảnh trích xuất từ PDF
-│       ├── manifest.json     # Quản lý hash SHA-256 nạp bù
-│       └── vector_store.npz  # Vector store + .meta.json
+│       ├── extracted_images/ # Ảnh tự động trích xuất từ PDF và Word (.docx)
+│       ├── manifest.json     # Quản lý hash SHA-256 nạp bù thông minh
+│       └── vector_store.npz  # Vector store NumPy + .meta.json
 ├── scripts/
-│   ├── ingest.py             # Nạp bù thông minh vào vector store
-│   ├── ask.py                # Hỏi đáp Multimodal RAG với Gemini
-│   └── search_local.py       # Tìm kiếm ngữ nghĩa 100% offline
+│   ├── ingest.py             # Nạp bù thông minh vào vector store (hỗ trợ --force)
+│   ├── ask.py                # Hỏi đáp RAG (tự động chọn Ollama offline hoặc Gemini)
+│   └── search_local.py       # Tìm kiếm ngữ nghĩa 100% offline (NumPy + E5)
 ├── src/rag/
 │   ├── __init__.py           # Public package API
-│   ├── config.py             # Environment settings
-│   ├── loader.py             # TXT, Markdown, PDF và Image loader
+│   ├── config.py             # Settings, tự động chọn LLM provider
+│   ├── loader.py             # TXT, Markdown, PDF, Word (.docx) & Image loader
 │   ├── multimodal.py         # EasyOCR cục bộ + Gemini Vision processor
-│   ├── chunker.py            # Character-based chunking kèm image_path
-│   ├── embeddings.py         # Local Sentence Transformers embeddings
-│   ├── vector_store.py       # NumPy cosine search + metadata image persistence
+│   ├── chunker.py            # Phân đoạn ký tự kèm bảo toàn image_path
+│   ├── embeddings.py         # Local Sentence Transformers (multilingual-e5-small)
+│   ├── vector_store.py       # NumPy cosine search + metadata & image persistence
 │   ├── prompts.py            # System prompt và RAG template có visual context
-│   ├── llm.py                # Gemini adapter hỗ trợ truyền hình ảnh trực quan
+│   ├── llm.py                # Dual LLM Engine: OllamaLLM (local) & GeminiLLM (cloud)
 │   └── pipeline.py           # RAGPipeline điều phối Ingestion & Query
 ├── tests/
-│   └── test_smoke.py         # 6 smoke unit tests offline
+│   └── test_smoke.py         # 8 smoke unit tests offline
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml
@@ -427,7 +447,9 @@ RAG-from-zero/
 <a id="quyet-dinh-thiet-ke"></a>
 ## Quyết định thiết kế
 
+- **Dual LLM Engine (Offline & Cloud):** Linh hoạt chuyển đổi giữa `Ollama` (riêng tư, không cần mạng, chi phí 0đ) và `Gemini` (mạnh mẽ, đa phương thức trên cloud).
 - **Hybrid Multimodal RAG:** Kết hợp cả 3 kỹ thuật: OCR trích xuất chữ/số liệu bảng biểu + Vision AI đọc hiểu biểu đồ ngữ nghĩa + Visual LLM Grounding (gửi ảnh gốc cho LLM lúc trả lời).
+- **Trích xuất tài liệu toàn diện:** Hỗ trợ cả file PDF và Word (`.docx`), tự động giải nén và bóc tách cả văn bản lẫn hình ảnh nhúng bên trong bằng thư viện thuần.
 - **Incremental Ingestion (SHA-256):** Tự động phát hiện file mới, sửa đổi hoặc xóa; chỉ nhúng các file thay đổi, tiết kiệm thời gian và tài nguyên CPU.
 - **NumPy thay cho vector database:** Cho thấy retrieval thực chất là chuẩn hóa vector, nhân ma trận và sắp xếp điểm.
 - **Local embeddings:** Giảm phụ thuộc API và tách rõ retrieval khỏi generation.
@@ -440,35 +462,39 @@ RAG-from-zero/
 - Retrieval luôn lấy `top_k` kết quả, chưa có ngưỡng relevance tối thiểu hoặc reranker.
 - EasyOCR chạy trên CPU tiêu thụ RAM và thời gian khởi tạo lần đầu; có thể bật GPU nếu môi trường hỗ trợ CUDA.
 - NumPy search phù hợp demo hoặc tập dữ liệu vừa và nhỏ (< 50,000 chunks); hệ thống lớn nên dùng FAISS/Qdrant.
-- Câu hỏi và các chunk được truy xuất sẽ được gửi tới Gemini khi dùng `ask.py`. Không dùng tài liệu nhạy cảm nếu chưa đánh giá chính sách dữ liệu.
+- Khi chọn `LLM_PROVIDER=gemini`, câu hỏi và các chunk được truy xuất sẽ được gửi tới Google. Không gửi tài liệu nhạy cảm nếu chưa đánh giá chính sách dữ liệu; với tài liệu mật, hãy chọn `LLM_PROVIDER=ollama`.
 
 <a id="xu-ly-loi-thuong-gap"></a>
 ## Xử lý lỗi thường gặp
 
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |---|---|---|
-| `Thiếu GEMINI_API_KEY` | Chưa tạo `.env` hoặc key đang trống | Sao chép `.env.example`, điền key rồi chạy lại (chỉ cần khi dùng `ask.py`) |
+| `Không thể kết nối localhost:11434` / `URLError` | Ollama service chưa được bật trên máy | Mở ứng dụng Ollama hoặc gõ lệnh `ollama serve` trong terminal |
+| `model 'qwen2.5:3b' not found` trên Ollama | Chưa tải model về máy | Chạy `ollama run qwen2.5:3b` hoặc `ollama pull qwen2.5:3b` |
+| `Thiếu GEMINI_API_KEY` | Chọn `gemini` nhưng chưa điền key trong `.env` | Sao chép `.env.example`, điền key hoặc đổi sang `LLM_PROVIDER=ollama` |
 | `Chưa có vector store` | Chưa chạy ingestion | Chạy `python scripts/ingest.py` trước khi hỏi |
-| `Không tìm thấy tài liệu nào` | `data/raw/` không có file được hỗ trợ | Thêm TXT, Markdown, PDF hoặc ảnh rồi ingest lại |
+| `Không tìm thấy tài liệu nào` | `data/raw/` không có file được hỗ trợ | Thêm TXT, Markdown, DOCX, PDF hoặc ảnh rồi ingest lại |
 | `overlap phải nhỏ hơn chunk_size` | Cấu hình overlap không hợp lệ | Giảm `RAG_CHUNK_OVERLAP` hoặc tăng `RAG_CHUNK_SIZE` |
 | `ModuleNotFoundError` | Chưa kích hoạt `.venv` hoặc thiếu dependencies | Kích hoạt venv và chạy `pip install -r requirements.txt` |
 | Lần ingest đầu chạy lâu | Đang tải model embedding và model EasyOCR | Chờ tải xong; các lần sau dùng cache cục bộ |
-| `429` hoặc `RESOURCE_EXHAUSTED` | Hết quota hay rate limit Gemini | Chờ rồi thử lại hoặc kiểm tra quota/billing |
+| `429` hoặc `RESOURCE_EXHAUSTED` | Hết quota hay rate limit Gemini | Chờ rồi thử lại hoặc chuyển sang dùng Ollama cục bộ |
 | `5xx` từ Gemini | Dịch vụ tạm thời không khả dụng | Client tự retry có giới hạn; thử lại sau nếu vẫn lỗi |
 
 <a id="lo-trinh"></a>
 ## Lộ trình mở rộng
 
-- [ ] Semantic hoặc token-aware chunking.
-- [ ] Relevance threshold và reranking (bằng cross-encoder).
 - [x] Incremental ingestion theo SHA-256 hash (nạp bù thông minh).
+- [x] Hỗ trợ định dạng Microsoft Word (`.docx`) bóc tách text và ảnh nhúng.
+- [x] Tích hợp Dual LLM Engine: Ollama (100% offline nội bộ) & Google Gemini (Cloud).
 - [x] Hybrid Multimodal RAG (kết hợp EasyOCR cục bộ + Gemini Vision).
-- [x] Tự động bóc tách hình ảnh nhúng từ tệp PDF.
+- [x] Tự động bóc tách hình ảnh nhúng từ tệp PDF và DOCX.
 - [x] Visual LLM Grounding (gửi hình ảnh đính kèm cho mô hình sinh).
 - [ ] FAISS, Chroma, Qdrant hoặc pgvector backend.
+- [ ] Relevance threshold và reranking (bằng cross-encoder).
+- [ ] Semantic hoặc token-aware chunking.
 - [ ] Đánh giá retrieval bằng Recall@K, MRR và bộ câu hỏi chuẩn.
-- [ ] Streaming response và giao diện web.
-- [ ] Mở rộng thành AI Agent: điều phối nhiều tool qua Gemini, Claude hoặc OpenAI.
+- [ ] Streaming response và giao diện web (Gradio / Streamlit).
+- [ ] Mở rộng thành AI Agent: điều phối nhiều tool qua Gemini, Claude hoặc Ollama.
 
 <a id="nguon-tham-khao"></a>
 ## Nguồn tham khảo
