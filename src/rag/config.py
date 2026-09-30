@@ -24,7 +24,12 @@ load_dotenv(PROJECT_ROOT / ".env")
 class Settings:
     """Toàn bộ cấu hình cần thiết, gom về một chỗ (immutable cho an toàn)."""
 
-    # --- Gemini (CHỈ dùng để chat) ---
+    # --- LLM Provider ('gemini' hoặc 'ollama') ---
+    llm_provider: str
+    ollama_model: str
+    ollama_base_url: str
+
+    # --- Gemini (dùng khi llm_provider='gemini') ---
     api_key: str
     chat_model: str
 
@@ -32,7 +37,7 @@ class Settings:
     embed_model: str
 
     # --- Đường dẫn dữ liệu ---
-    raw_dir: Path       # Nơi chứa tài liệu gốc (.txt, .md, .pdf)
+    raw_dir: Path       # Nơi chứa tài liệu gốc (.txt, .md, .pdf, .docx, ảnh)
     store_path: Path    # Nơi lưu vector store đã build
     manifest_path: Path # Nơi lưu hash và thông tin tài liệu đã nạp (cho incremental ingestion)
     extracted_images_dir: Path # Nơi lưu hình ảnh trích xuất từ tài liệu
@@ -47,9 +52,18 @@ def load_settings() -> Settings:
     """Đọc cấu hình từ môi trường và trả về đối tượng Settings."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
+    # Tự động nhận diện provider: nếu đặt rõ LLM_PROVIDER thì dùng nó,
+    # ngược lại: nếu có API key thì dùng Gemini, không có thì mặc định dùng Ollama cục bộ.
+    llm_provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if not llm_provider:
+        llm_provider = "gemini" if api_key else "ollama"
+
     data_dir = PROJECT_ROOT / "data"
     store_dir = data_dir / "processed"
     return Settings(
+        llm_provider=llm_provider,
+        ollama_model=os.getenv("OLLAMA_MODEL", "qwen2.5:7b").strip(),
+        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip(),
         api_key=api_key,
         chat_model=os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-latest"),
         # Model embedding cục bộ (sentence-transformers) — miễn phí, không cần API

@@ -27,7 +27,7 @@ from . import prompts
 from .chunker import chunk_documents
 from .config import Settings, load_settings
 from .embeddings import LocalEmbedder
-from .llm import GeminiLLM
+from .llm import GeminiLLM, OllamaLLM
 from .loader import load_documents, load_file_documents, load_single_document, scan_raw_files
 from .multimodal import MultimodalProcessor
 from .vector_store import SearchResult, VectorStore
@@ -57,7 +57,7 @@ class RAGPipeline:
                 http_status_codes=[429, 500, 502, 503, 504],
             )
         )
-        self._llm: GeminiLLM | None = None
+        self._llm: GeminiLLM | OllamaLLM | None = None
         self._multimodal_processor: MultimodalProcessor | None = None
 
         # Embedding chạy CỤC BỘ, miễn phí — không cần API, không tốn quota
@@ -81,18 +81,25 @@ class RAGPipeline:
         return self._multimodal_processor
 
     @property
-    def llm(self) -> GeminiLLM:
-        """Khởi tạo GeminiLLM khi thực sự cần gọi sinh câu trả lời."""
+    def llm(self) -> GeminiLLM | OllamaLLM:
+        """Khởi tạo LLM (Ollama offline hoặc Gemini) khi thực sự cần gọi sinh câu trả lời."""
         if self._llm is None:
-            if not self.settings.api_key:
-                raise RuntimeError(
-                    "Thiếu GEMINI_API_KEY.\n"
-                    "-> Hãy mở file .env và điền API key lấy từ https://aistudio.google.com/apikey"
+            if self.settings.llm_provider == "ollama":
+                self._llm = OllamaLLM(
+                    model=self.settings.ollama_model,
+                    base_url=self.settings.ollama_base_url,
                 )
-            client = genai.Client(
-                api_key=self.settings.api_key, http_options=self._http_options
-            )
-            self._llm = GeminiLLM(client, self.settings.chat_model)
+            else:
+                if not self.settings.api_key:
+                    raise RuntimeError(
+                        "Thiếu GEMINI_API_KEY.\n"
+                        "-> Bạn có thể điền API key vào file .env HOẶC chuyển sang dùng Ollama offline:\n"
+                        "   Trong file .env thêm: LLM_PROVIDER=ollama"
+                    )
+                client = genai.Client(
+                    api_key=self.settings.api_key, http_options=self._http_options
+                )
+                self._llm = GeminiLLM(client, self.settings.chat_model)
         return self._llm
 
     # ---------- GIAI ĐOẠN 1: INGEST (offline) ----------

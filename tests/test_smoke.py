@@ -98,3 +98,19 @@ def test_vector_store_retrieves_image_path():
 
     context = build_context(results)
     assert "hình ảnh: path/to/diagram.png" in context
+
+
+def test_settings_detects_llm_provider():
+    from rag.config import load_settings
+
+    settings = load_settings()
+    assert settings.llm_provider in {"gemini", "ollama"}
+    assert settings.ollama_model != ""
+
+
+def test_ollama_llm_initialization():
+    from rag.llm import OllamaLLM
+
+    llm = OllamaLLM(model="qwen2.5:7b")
+    assert llm._model == "qwen2.5:7b"
+    assert "11434" in llm._base_url
