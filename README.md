@@ -4,12 +4,13 @@
 
 # RAG From Zero
 
-### Xây dựng pipeline Retrieval-Augmented Generation bằng Python, local embeddings và Google Gemini
+### Xây dựng pipeline Retrieval-Augmented Generation bằng Python, local embeddings, Google Gemini và Ollama (100% Offline)
 
 Một project RAG nhỏ gọn giúp bạn nhìn rõ toàn bộ quy trình **Load → Chunk → Embed → Store → Retrieve → Generate**, không phụ thuộc vào framework orchestration phức tạp.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![Gemini](https://img.shields.io/badge/Generation-Google%20Gemini-8E75B2?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
+[![Ollama](https://img.shields.io/badge/Local%20LLM-Ollama-000000?style=flat-square&logo=ollama&logoColor=white)](https://ollama.com/)
+[![Gemini](https://img.shields.io/badge/Cloud%20LLM-Google%20Gemini-8E75B2?style=flat-square&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 [![NumPy](https://img.shields.io/badge/Vector%20Store-NumPy-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
 [![Embeddings](https://img.shields.io/badge/Embeddings-Local%20E5-F59E0B?style=flat-square)](#embedding-cuc-bo)
 [![GitHub stars](https://img.shields.io/github/stars/QuocTien004/RAG-from-zero?style=flat-square&logo=github&color=181717)](https://github.com/QuocTien004/RAG-from-zero/stargazers)
@@ -67,14 +68,15 @@ flowchart TD
 | Khả năng | Chi tiết |
 |---|---|
 | **Hybrid Multimodal RAG** | Kết hợp 3 kỹ thuật: OCR cục bộ (EasyOCR) + Vision AI (Gemini) + Visual Grounding (gửi ảnh gốc cho LLM) |
+| **Dual LLM Provider** | Hỗ trợ song song cả **Ollama** (100% offline trên máy, không cần mạng, 0đ API) và **Google Gemini** (Cloud API) |
 | **Nạp bù thông minh** | Quản lý bằng mã băm SHA-256 (`manifest.json`): chỉ nhúng file mới/sửa đổi, tự động dọn dẹp file bị xóa |
-| **Đa dạng định dạng tài liệu** | Nạp đệ quy văn bản (`.txt`, `.md`), PDF và tệp hình ảnh (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`) |
-| **Bóc tách ảnh nhúng từ PDF** | Tự động trích xuất các hình vẽ/biểu đồ trong PDF vào `data/processed/extracted_images/` để lập chỉ mục |
+| **Đa dạng định dạng tài liệu** | Nạp đệ quy văn bản (`.txt`, `.md`), PDF, Word (`.docx`) và tệp hình ảnh (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`) |
+| **Bóc tách ảnh nhúng từ PDF & Word** | Tự động trích xuất các hình vẽ/biểu đồ trong PDF và DOCX vào `data/processed/extracted_images/` để lập chỉ mục |
 | **Embedding cục bộ & Offline Search** | Dùng `multilingual-e5-small`, hỗ trợ tiếng Việt, không tốn quota API; có tool tìm kiếm 100% offline |
 | **Vector store tối giản** | Lưu vector bằng NumPy (.npz + .meta.json), tìm kiếm cosine bằng phép nhân ma trận |
 | **Trả lời trực quan có nguồn** | Mỗi kết quả giữ tên file, nội dung chunk, điểm tương đồng và đường dẫn hình ảnh đính kèm |
-| **Prompt chống bịa** | Gemini được yêu cầu chỉ dùng ngữ cảnh và nói rõ khi thiếu thông tin |
-| **Có kiểm thử offline** | Smoke tests cho chunking, retrieval và multimodal search không cần gọi API |
+| **Prompt chống bịa** | LLM được yêu cầu chỉ dùng ngữ cảnh và nói rõ khi thiếu thông tin |
+| **Có kiểm thử offline** | 8 smoke tests cho chunking, retrieval, multimodal search và Ollama initialization không cần gọi API |
 
 > Thiết kế ưu tiên tính trực quan, độc lập và làm chủ toàn bộ luồng dữ liệu của kiến trúc RAG trước khi tích hợp các vector database chuyên dụng.
 
@@ -330,9 +332,12 @@ Embedding không tiêu thụ quota Gemini. Tuy nhiên, lần chạy đầu phả
 
 | Biến | Mặc định | Mô tả |
 |---|---:|---|
-| `GEMINI_API_KEY` | Bắt buộc (khi chat) | API key dùng cho bước generation và Vision captioning |
-| `GEMINI_CHAT_MODEL` | `gemini-flash-latest` | Model Gemini sinh câu trả lời |
-| `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Sentence Transformers model chạy cục bộ |
+| `LLM_PROVIDER` | `ollama` (nếu không có key) / `gemini` | Chọn mô hình sinh câu trả lời: `ollama` (100% offline) hoặc `gemini` (cloud API) |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Tên mô hình chạy cục bộ qua Ollama (`qwen2.5:3b`, `qwen2.5:7b`, `llama3.1`...) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Địa chỉ REST API của máy chủ Ollama nội bộ |
+| `GEMINI_API_KEY` | Bắt buộc (khi dùng Gemini) | API key dùng cho bước generation và Vision captioning khi dùng Google AI |
+| `GEMINI_CHAT_MODEL` | `gemini-flash-latest` | Model Gemini sinh câu trả lời trên cloud |
+| `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Sentence Transformers model chạy cục bộ (0đ API) |
 | `RAG_CHUNK_SIZE` | `800` | Số ký tự tối đa trong mỗi chunk |
 | `RAG_CHUNK_OVERLAP` | `120` | Số ký tự lặp lại giữa hai chunk liền nhau |
 | `RAG_TOP_K` | `4` | Số chunk được đưa vào prompt cho mỗi câu hỏi |
